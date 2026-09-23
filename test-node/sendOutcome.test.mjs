@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { isSyncFailedToWait, prepareThenPublish } from '../src/lib/sendOutcome.ts'
+import { isSendError, isSyncFailedToWait, prepareThenPublish } from '../src/lib/sendOutcome.ts'
 
 const WIRE = '[GroupError::SyncFailedToWait] Sync failed to wait for intent'
 
@@ -38,4 +38,47 @@ test('a prepare failure rejects before publishing', async () => {
     /Codec type/,
   )
   assert.equal(published, false)
+})
+
+// Ruling 11 (SP3 final review I4): once prepare succeeded, the message is stored Unpublished
+// and a later publish may still send it, so a rejection must carry its id for reconciliation.
+test('a non-SyncFailedToWait publish error carries the prepared messageId', async () => {
+  const err = await prepareThenPublish(async () => 'm4', async () => {
+    throw new Error('[GroupError::GroupInactive] Group is inactive')
+  }).then(
+    () => assert.fail('must reject'),
+    (e) => e,
+  )
+  assert.match(err.message, /GroupInactive/)
+  assert.equal(err.messageId, 'm4')
+  assert.equal(isSendError(err), true)
+})
+
+test('a non-Error publish rejection is wrapped so it can carry the messageId', async () => {
+  const err = await prepareThenPublish(async () => 'm5', async () => {
+    throw 'boom'
+  }).then(
+    () => assert.fail('must reject'),
+    (e) => e,
+  )
+  assert.equal(isSendError(err), true)
+  assert.equal(err.messageId, 'm5')
+  assert.match(err.message, /boom/)
+})
+
+test('isSendError is false for anything without a string messageId', () => {
+  assert.equal(isSendError(new Error('x')), false)
+  assert.equal(isSendError(null), false)
+  assert.equal(isSendError('m1'), false)
+  assert.equal(isSendError(Object.assign(new Error('x'), { messageId: 7 })), false)
+})
+
+test('a prepare failure carries no messageId (nothing was stored)', async () => {
+  const err = await prepareThenPublish(async () => {
+    throw new Error('Codec type is not registered')
+  }, async () => {}).then(
+    () => assert.fail('must reject'),
+    (e) => e,
+  )
+  assert.equal(isSendError(err), false)
 })

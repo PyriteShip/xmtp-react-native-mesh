@@ -2120,8 +2120,12 @@ export type {
   BluetoothStatus,
   BluetoothAdapterState,
 } from './lib/meshCodec'
-export { isSyncFailedToWait, prepareThenPublish } from './lib/sendOutcome'
-export type { SendResult, SendStatus } from './lib/sendOutcome'
+export {
+  isSendError,
+  isSyncFailedToWait,
+  prepareThenPublish,
+} from './lib/sendOutcome'
+export type { SendError, SendResult, SendStatus } from './lib/sendOutcome'
 export * from './lib/ContentCodec'
 export { Conversation, ConversationVersion } from './lib/Conversation'
 export { XMTPPush } from './lib/XMTPPush'

@@ -137,7 +137,10 @@ export class Group<
    * `status: 'queued'` means libxmtp stored it (Unpublished) and will deliver it
    * later: on the Bluetooth mesh, when this DM's sequencer is reachable. It is
    * not a failure; the stream echoes the message once it is published.
-   * Implemented as `prepareMessage` then `publishPreparedMessages`.
+   * Implemented as `prepareMessage` then `publishPreparedMessages`. Any other
+   * publish error rejects with a `SendError` (`isSendError`) carrying the stored
+   * `messageId`: a later publish may still send that message, so reconcile by id
+   * before offering a retry.
    */
   async sendWithStatus<
     SendContentTypes extends DefaultContentTypes = ContentTypes,

@@ -56,7 +56,8 @@ export interface ConversationBase<ContentTypes extends DefaultContentTypes> {
   /**
    * Sends and reports `published`, or `queued` when libxmtp stored the message
    * but could not confirm it yet (SyncFailedToWait; normal on the mesh for a DM
-   * this device did not create). Other failures reject.
+   * this device did not create). Other failures reject; once the message was
+   * stored, with a `SendError` carrying its `messageId` (`isSendError`).
    */
   sendWithStatus<SendContentTypes extends DefaultContentTypes = ContentTypes>(
     content: ConversationSendPayload<SendContentTypes>,
