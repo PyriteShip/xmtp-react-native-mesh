@@ -89,6 +89,7 @@ import org.xmtp.android.library.push.XMTPPush
 import uniffi.xmtpv3.FfiKeyPackageStatus
 import uniffi.xmtpv3.FfiLogLevel
 import uniffi.xmtpv3.FfiLogRotation
+import uniffi.xmtpv3.generateInboxId
 import java.io.BufferedReader
 import java.io.File
 import java.io.InputStreamReader
@@ -237,6 +238,7 @@ class XMTPModule : Module() {
         dbEncryptionKey: List<Int>,
         authParams: String,
         hasPreAuthenticateToInboxCallback: Boolean? = null,
+        meshInboxId: String? = null,
     ): ClientOptions {
         if (hasPreAuthenticateToInboxCallback == true)
             preAuthenticateToInboxCallbackDeferred = CompletableDeferred()
@@ -247,10 +249,19 @@ class XMTPModule : Module() {
             dbEncryptionKey.foldIndexed(ByteArray(dbEncryptionKey.size)) { i, a, v ->
                 a.apply { set(i, v.toByte()) }
             }
-        // The mesh node shares the client's database key; its file is per installation
-        // (MeshNodeFiles; rotated by deleteLocalDatabase under mesh).
+        // The mesh node shares the client's database key; its file is per inbox and follows
+        // that inbox's libxmtp DB (Ruling 8): a fresh node when the DB does not exist yet.
+        // Called inside meshClientCreation's node lock (Ruling 9).
         val mesh =
-            if (authOptions.environment == "mesh") MeshOptions.currentNode(context, encryptionKeyBytes) else null
+            if (authOptions.environment == "mesh") {
+                meshBridge.nodeForClientLocked(
+                    context,
+                    meshInboxId ?: throw XMTPException("XMTP env 'mesh' needs the client's inbox id"),
+                    encryptionKeyBytes,
+                    authOptions.dbDirectory,
+                    openNodePaths = meshOptions.values.map { it.dbPath },
+                )
+            } else null
         return ClientOptions(
             api = apiEnvironments(
                 authOptions.environment,
@@ -288,8 +299,16 @@ class XMTPModule : Module() {
      */
     private suspend fun <T> meshClientCreation(authParams: String, block: suspend () -> T): T {
         if (AuthParamsWrapper.authParamsFromJson(authParams).environment != "mesh") return block()
-        return meshBridge.withNodeLock { block() }
+        return meshBridge.withNodeLock { MeshBridge.mapNodeMismatch { block() } }
     }
+
+    /**
+     * The inbox a mesh client is about to open (Ruling 8), computed locally: libxmtp's
+     * `createFfiClient` always uses nonce 0, and under the mesh `getOrCreateInboxId` falls back
+     * to the same `generateInboxId(identity, 0)` for an identity the node has not seen.
+     */
+    private fun meshInboxIdFor(identity: PublicIdentity): String =
+        generateInboxId(identity.ffiPrivate, 0uL)
 
     private var xmtpPush: XMTPPush? = null
     private var signer: ReactNativeSigner? = null
@@ -361,7 +380,7 @@ class XMTPModule : Module() {
                     // concurrent meshStart can never reopen the pre-rotation generation before
                     // it is deleted.
                     var deleted = false
-                    meshBridge.stopAndRotate(context) { deleted = client.deleteLocalDatabase() }
+                    meshBridge.stopAndRotate(context, client.inboxId) { deleted = client.deleteLocalDatabase() }
                     meshOptions.remove(installationId)
                     deleted
                 } else {
@@ -377,7 +396,7 @@ class XMTPModule : Module() {
                 val client = clients[installationId] ?: throw XMTPException("No client")
                 val options = meshOptions[installationId]
                     ?: throw XMTPException("client $installationId was not created with env 'mesh'")
-                meshBridge.start(context, client, options)
+                MeshBridge.mapNodeMismatch { meshBridge.start(context, client, options) }
             }
         }
 
@@ -385,8 +404,8 @@ class XMTPModule : Module() {
             withContext(Dispatchers.IO) { meshBridge.stop(context) }
         }
 
-        AsyncFunction("meshResetNode") Coroutine { ->
-            withContext(Dispatchers.IO) { meshBridge.resetNode(context) }
+        AsyncFunction("meshResetNode") Coroutine { inboxId: String? ->
+            withContext(Dispatchers.IO) { meshBridge.resetNode(context, inboxId) }
         }
 
         Function("meshPeers") { -> meshBridge.peersJson() }
@@ -460,6 +479,7 @@ class XMTPModule : Module() {
                         dbEncryptionKey,
                         authParams,
                         hasPreAuthenticateToInboxCallback,
+                        meshInboxId = meshInboxIdFor(privateKey.publicIdentity),
                     )
                     Client.create(account = privateKey, options = options) to options
                 }
@@ -490,6 +510,7 @@ class XMTPModule : Module() {
                         dbEncryptionKey,
                         authParams,
                         hasAuthInboxCallback,
+                        meshInboxId = meshInboxIdFor(identity),
                     )
                     Client.create(account = reactSigner, options = options) to options
                 }
@@ -509,6 +530,7 @@ class XMTPModule : Module() {
                     val options = clientOptions(
                         dbEncryptionKey,
                         authParams,
+                        meshInboxId = inboxId ?: meshInboxIdFor(identity),
                     )
                     Client.build(
                         publicIdentity = identity,
@@ -531,6 +553,7 @@ class XMTPModule : Module() {
                     val options = clientOptions(
                         dbEncryptionKey,
                         authParams,
+                        meshInboxId = meshInboxIdFor(identity),
                     )
                     Client.ffiCreateClient(
                         publicIdentity = identity,

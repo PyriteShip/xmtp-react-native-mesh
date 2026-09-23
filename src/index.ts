@@ -100,8 +100,8 @@ export async function meshStop(): Promise<void> {
   return await XMTPModule.meshStop()
 }
 
-export async function meshResetNode(): Promise<void> {
-  return await XMTPModule.meshResetNode()
+export async function meshResetNode(inboxId?: string): Promise<void> {
+  return await XMTPModule.meshResetNode(inboxId ?? null)
 }
 
 export function meshPeersJson(): string {

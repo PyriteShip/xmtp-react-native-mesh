@@ -23,8 +23,10 @@ function assertAndroid(): void {
  * The Bluetooth mesh radio for a client created with env 'mesh' (Android only).
  * Start it from the foreground after the client is ready and the runtime
  * permissions in `requestedPermissions()` are granted; `start` is idempotent.
- * Deleting the client's local database stops it and moves the next client to a
- * fresh node database; `resetNode` does the same when no client exists.
+ * The mesh node database is per inbox and follows that inbox's libxmtp database:
+ * a client whose database does not exist yet (a new installation) gets a fresh
+ * node on its own, and deleting the client's local database stops the radio and
+ * rotates that inbox's node. `resetNode` is for recovery only.
  *
  * Before creating a DM with a nearby peer, wait for it in `peers()` AND for
  * `canMessage(me, peer.installationId)`: a DM created before the peer's key
@@ -45,9 +47,15 @@ export const Mesh = {
     await XMTPModule.meshStop()
   },
 
-  async resetNode(): Promise<void> {
+  /**
+   * Recovery only: stops the radio and moves `inboxId`'s node (every inbox's when
+   * omitted) to a fresh database. Never needed for correctness, and harmful when
+   * the inbox's libxmtp database is kept: that installation then reopens on an
+   * empty node that does not know it.
+   */
+  async resetNode(inboxId?: string): Promise<void> {
     assertAndroid()
-    await XMTPModule.meshResetNode()
+    await XMTPModule.meshResetNode(inboxId)
   },
 
   /** Verified peers now; `peerId` is connection-scoped, so group by `inboxId`. */

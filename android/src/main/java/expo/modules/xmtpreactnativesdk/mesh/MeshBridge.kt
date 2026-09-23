@@ -27,6 +27,7 @@ import org.xmtp.android.library.mesh.MeshNodeFiles
 import org.xmtp.android.library.mesh.MeshOptions
 import org.xmtp.android.library.mesh.MeshRadio
 import org.xmtp.android.library.mesh.policy.MeshPermissions
+import java.io.File
 
 /**
  * XMTPModule's handle on the Android mesh radio (org.xmtp.android.library.mesh.Mesh).
@@ -87,26 +88,70 @@ class MeshBridge(private val emit: (String, Map<String, Any?>) -> Unit) {
         emitStopped()
     }
 
-    /** For a host with no live client (e.g. delete identity after a failed start): fresh node DB. */
-    suspend fun resetNode(context: Context) {
-        stopAndRotate(context)
+    /**
+     * Recovery only (Ruling 8): stops the radio and moves [inboxId]'s node (every inbox's when
+     * null) to a fresh generation. Not needed for correctness: a client whose inbox has no
+     * libxmtp DB yet gets a fresh node on its own ([nodeForClientLocked]). An inbox whose libxmtp
+     * DB is kept then reopens on an empty node that does not know its installation.
+     */
+    suspend fun resetNode(context: Context, inboxId: String?) {
+        stopAndRotate(context, inboxId)
     }
 
     /**
-     * Stops the radio, runs [between] (e.g. `client.deleteLocalDatabase()`), and moves the next
-     * client to a fresh node database (MeshNodeFiles.rotate) — all under one acquisition of this
-     * bridge's lock. See the class doc for why [stop] and a rotate must never be composed as two
-     * separate calls instead of this one.
+     * Stops the radio, runs [between] (e.g. `client.deleteLocalDatabase()`), and moves
+     * [inboxId]'s next client to a fresh node database (MeshNodeFiles.rotate; every inbox when
+     * null) — all under one acquisition of this bridge's lock. See the class doc for why [stop]
+     * and a rotate must never be composed as two separate calls instead of this one.
      */
-    suspend fun stopAndRotate(context: Context, between: suspend () -> Unit = {}) {
+    suspend fun stopAndRotate(
+        context: Context,
+        inboxId: String?,
+        between: suspend () -> Unit = {},
+    ) {
         val app = context.applicationContext
         lock.withLock {
             cancelWatchers()
             Mesh.stop(app)
             between()
-            MeshNodeFiles.inAppFiles(app).rotate()
+            if (inboxId != null) {
+                MeshNodeFiles.forInbox(app, inboxId).rotate()
+            } else {
+                MeshNodeFiles.rotateAll(MeshNodeFiles.defaultDbDirectory(app))
+            }
         }
         emitStopped()
+    }
+
+    /**
+     * The node a new client of [inboxId] should open (Ruling 8): per inbox, and a fresh
+     * generation when that inbox's libxmtp DB (in [dbDirectory], the app default when null)
+     * does not exist yet, because the client is about to mint a new installation. Refuses with
+     * E_MESH_BUSY instead of rotating a node that is still open ([openNodePaths]: the nodes of
+     * this module's live mesh clients): a rotation deletes the old generation's files.
+     * Call only inside [withNodeLock].
+     */
+    fun nodeForClientLocked(
+        context: Context,
+        inboxId: String,
+        encryptionKey: ByteArray,
+        dbDirectory: String?,
+        openNodePaths: Collection<String>,
+    ): MeshOptions {
+        val app = context.applicationContext
+        val files = MeshNodeFiles.forInbox(app, inboxId)
+        val libxmtpDb = MeshNodeFiles.libxmtpDbFile(
+            dbDirectory?.let { File(it) } ?: MeshNodeFiles.defaultDbDirectory(app),
+            inboxId,
+        )
+        if (!libxmtpDb.exists() && files.current().absolutePath in openNodePaths) {
+            throw CodedException(
+                "E_MESH_BUSY",
+                "The mesh node for inbox $inboxId is still open; delete or drop its client first",
+                null,
+            )
+        }
+        return MeshOptions(files.forClient(libxmtpDb).absolutePath, encryptionKey)
     }
 
     fun setPairingMode(enabled: Boolean) {
@@ -219,6 +264,22 @@ class MeshBridge(private val emit: (String, Map<String, Any?>) -> Unit) {
          * rotate in the new one.
          */
         private val lock = Mutex()
+
+        private const val NODE_MISMATCH = "a mesh node serves exactly one local installation"
+
+        /**
+         * Ruling 8: libxmtp's "a mesh node serves exactly one local installation" (the node is
+         * bound to another installation) becomes the coded error E_MESH_NODE_MISMATCH.
+         */
+        suspend fun <T> mapNodeMismatch(block: suspend () -> T): T =
+            try {
+                block()
+            } catch (e: Exception) {
+                if (generateSequence<Throwable>(e) { it.cause }.any { it.message?.contains(NODE_MISMATCH) == true }) {
+                    throw CodedException("E_MESH_NODE_MISMATCH", e.message ?: NODE_MISMATCH, e)
+                }
+                throw e
+            }
 
         const val EVENT_PEERS = "meshPeers"
         const val EVENT_RADIO = "meshRadio"

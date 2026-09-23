@@ -88,7 +88,7 @@ test('stop() cancels watchers inside lock.withLock, not before it is taken', () 
 
 test('stopAndRotate() cancels watchers inside lock.withLock, not before it is taken', () => {
   const { inner: fnBody } = kotlinFunctionBody(
-    /suspend fun stopAndRotate\(\s*context: Context,\s*between: suspend \(\) -> Unit = \{\}\s*\)\s*/,
+    /suspend fun stopAndRotate\(\s*context: Context,\s*inboxId: String\?,\s*between: suspend \(\) -> Unit = \{\},?\s*\)\s*/,
     'stopAndRotate'
   )
   const lockMatch = /lock\.withLock\s*/.exec(fnBody)

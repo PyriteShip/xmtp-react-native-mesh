@@ -46,8 +46,8 @@ function kotlinFunctionBody(src, signaturePattern, label) {
 }
 
 test('MeshBridge.resetNode calls stopAndRotate, not stop()/rotate() as separate calls', () => {
-  const body = kotlinFunctionBody(meshBridgeSrc, /suspend fun resetNode\(context: Context\)\s*/, 'resetNode')
-  assert.match(body, /\bstopAndRotate\(context\)/, `resetNode's body was:\n${body}`)
+  const body = kotlinFunctionBody(meshBridgeSrc, /suspend fun resetNode\(context: Context, inboxId: String\?\)\s*/, 'resetNode')
+  assert.match(body, /\bstopAndRotate\(context, inboxId\)/, `resetNode's body was:\n${body}`)
   assert.doesNotMatch(body, /\bstop\(context\)/, `resetNode must not call stop() directly:\n${body}`)
   assert.doesNotMatch(body, /\brotate\(context\)/, `resetNode must not call rotate() directly:\n${body}`)
 })
@@ -69,7 +69,7 @@ test("deleteLocalDatabase's mesh branch calls meshBridge.stopAndRotate, not stop
 test('MeshBridge declares stopAndRotate with a between callback run under its own lock', () => {
   assert.match(
     meshBridgeSrc,
-    /suspend fun stopAndRotate\(\s*context: Context,\s*between: suspend \(\) -> Unit = \{\}\s*\)/,
-    'MeshBridge.kt must declare stopAndRotate(context, between)'
+    /suspend fun stopAndRotate\(\s*context: Context,\s*inboxId: String\?,\s*between: suspend \(\) -> Unit = \{\},?\s*\)/,
+    'MeshBridge.kt must declare stopAndRotate(context, inboxId, between)'
   )
 })
