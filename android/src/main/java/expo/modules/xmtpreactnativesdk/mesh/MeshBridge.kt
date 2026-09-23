@@ -55,11 +55,17 @@ import org.xmtp.android.library.mesh.policy.MeshPermissions
  * rotated away, with nothing left to cancel them.
  */
 class MeshBridge(private val emit: (String, Map<String, Any?>) -> Unit) {
-    private val lock = Mutex()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private var watchers: List<Job> = emptyList()
     private var bluetoothReceiver: BroadcastReceiver? = null
     private var receiverContext: Context? = null
+
+    /**
+     * Runs [block] under this bridge's lock (Ruling 9): XMTPModule creates mesh clients inside
+     * it, so reading and binding a node file is serialized against every rotation. Do not call
+     * back into this MeshBridge from [block] (the lock is not reentrant).
+     */
+    suspend fun <T> withNodeLock(block: suspend () -> T): T = lock.withLock { block() }
 
     /**
      * Idempotent (Review Focus 2): Mesh.start returns the running radio, and one set of
@@ -207,6 +213,13 @@ class MeshBridge(private val emit: (String, Map<String, Any?>) -> Unit) {
     }
 
     companion object {
+        /**
+         * Process-wide, like [Mesh] itself: XMTPModule (and this bridge) is recreated on every JS
+         * reload, and a create still running in the old instance must serialize against a
+         * rotate in the new one.
+         */
+        private val lock = Mutex()
+
         const val EVENT_PEERS = "meshPeers"
         const val EVENT_RADIO = "meshRadio"
         const val EVENT_BLUETOOTH = "bluetoothState"

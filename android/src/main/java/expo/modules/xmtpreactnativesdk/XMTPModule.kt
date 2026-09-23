@@ -278,6 +278,19 @@ class XMTPModule : Module() {
 
     private val meshBridge = MeshBridge { name, body -> sendEvent(name, body) }
 
+    /**
+     * Ruling 9 (SP3 final review I2): under env 'mesh', [clientOptions] (which picks the node
+     * file) and the Client call that opens and binds that node run inside
+     * [MeshBridge.withNodeLock], the lock a node rotation holds, so a rotate can never land
+     * between them. Under the mesh both are local and quick; a JS signer's signature request
+     * is answered through `receiveSignature`, which takes no lock. Other envs run [block]
+     * directly.
+     */
+    private suspend fun <T> meshClientCreation(authParams: String, block: suspend () -> T): T {
+        if (AuthParamsWrapper.authParamsFromJson(authParams).environment != "mesh") return block()
+        return meshBridge.withNodeLock { block() }
+    }
+
     private var xmtpPush: XMTPPush? = null
     private var signer: ReactNativeSigner? = null
     private val isDebugEnabled = BuildConfig.DEBUG // TODO: consider making this configurable
@@ -442,13 +455,14 @@ class XMTPModule : Module() {
             withContext(Dispatchers.IO) {
                 logV("createRandom")
                 val privateKey = PrivateKeyBuilder()
-                val options = clientOptions(
-                    dbEncryptionKey,
-                    authParams,
-                    hasPreAuthenticateToInboxCallback,
-                )
-                val randomClient =
-                    Client.create(account = privateKey, options = options)
+                val (randomClient, options) = meshClientCreation(authParams) {
+                    val options = clientOptions(
+                        dbEncryptionKey,
+                        authParams,
+                        hasPreAuthenticateToInboxCallback,
+                    )
+                    Client.create(account = privateKey, options = options) to options
+                }
 
                 ContentJson.Companion
                 clients[randomClient.installationId] = randomClient
@@ -471,13 +485,14 @@ class XMTPModule : Module() {
                     blockNumber = walletOptions.blockNumber
                 )
                 signer = reactSigner
-                val options = clientOptions(
-                    dbEncryptionKey,
-                    authParams,
-                    hasAuthInboxCallback,
-                )
-                val client =
-                    Client.create(account = reactSigner, options = options)
+                val (client, options) = meshClientCreation(authParams) {
+                    val options = clientOptions(
+                        dbEncryptionKey,
+                        authParams,
+                        hasAuthInboxCallback,
+                    )
+                    Client.create(account = reactSigner, options = options) to options
+                }
                 clients[client.installationId] = client
                 rememberMesh(client, options)
                 ContentJson.Companion
@@ -489,16 +504,18 @@ class XMTPModule : Module() {
         AsyncFunction("build") Coroutine { publicIdentity: String, inboxId: String?, dbEncryptionKey: List<Int>, authParams: String ->
             withContext(Dispatchers.IO) {
                 logV("build")
-                val options = clientOptions(
-                    dbEncryptionKey,
-                    authParams,
-                )
                 val identity = PublicIdentityWrapper.publicIdentityFromJson(publicIdentity)
-                val client = Client.build(
-                    publicIdentity = identity,
-                    options = options,
-                    inboxId = inboxId,
-                )
+                val (client, options) = meshClientCreation(authParams) {
+                    val options = clientOptions(
+                        dbEncryptionKey,
+                        authParams,
+                    )
+                    Client.build(
+                        publicIdentity = identity,
+                        options = options,
+                        inboxId = inboxId,
+                    ) to options
+                }
                 ContentJson.Companion
                 clients[client.installationId] = client
                 rememberMesh(client, options)
@@ -509,15 +526,17 @@ class XMTPModule : Module() {
         AsyncFunction("ffiCreateClient") Coroutine { publicIdentity: String, dbEncryptionKey: List<Int>, authParams: String ->
             withContext(Dispatchers.IO) {
                 logV("ffiCreateClient")
-                val options = clientOptions(
-                    dbEncryptionKey,
-                    authParams,
-                )
                 val identity = PublicIdentityWrapper.publicIdentityFromJson(publicIdentity)
-                val client = Client.ffiCreateClient(
-                    publicIdentity = identity,
-                    clientOptions = options,
-                )
+                val (client, options) = meshClientCreation(authParams) {
+                    val options = clientOptions(
+                        dbEncryptionKey,
+                        authParams,
+                    )
+                    Client.ffiCreateClient(
+                        publicIdentity = identity,
+                        clientOptions = options,
+                    ) to options
+                }
                 ContentJson.Companion
                 clients[client.installationId] = client
                 rememberMesh(client, options)
