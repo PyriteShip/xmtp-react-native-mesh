@@ -37,6 +37,11 @@ export const Mesh = {
     return Platform.OS === 'android'
   },
 
+  /**
+   * Idempotent for the same client. A new client object for the installation the
+   * radio already serves (e.g. after a JS reload) rebinds the radio to it; a
+   * different installation rejects with code `E_MESH_BUSY` until `stop()`.
+   */
   async start(installationId: InstallationId | string): Promise<void> {
     assertAndroid()
     await XMTPModule.meshStart(installationId as InstallationId)

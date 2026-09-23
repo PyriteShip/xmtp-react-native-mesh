@@ -71,10 +71,32 @@ class MeshBridge(private val emit: (String, Map<String, Any?>) -> Unit) {
     /**
      * Idempotent (Review Focus 2): Mesh.start returns the running radio, and one set of
      * collectors serves it; a repeated start adds none.
+     *
+     * Ruling 10 (SP3 final review I3): [Mesh] is a process singleton but XMTPModule and its
+     * clients are recreated on every JS reload, so the running radio may serve a Client that
+     * JS no longer holds. For the same installation with a different Client object this stops
+     * and restarts the radio (rebind); for a different installation it rejects with
+     * E_MESH_BUSY — call [stop] first.
      */
     suspend fun start(context: Context, client: Client, options: MeshOptions) {
+        val app = context.applicationContext
         lock.withLock {
-            val radio = Mesh.start(context.applicationContext, client, options)
+            val serving = running
+            if (serving != null && Mesh.radio != null && serving.installationId != client.installationId) {
+                throw CodedException(
+                    "E_MESH_BUSY",
+                    "The mesh radio is serving installation ${serving.installationId}; call Mesh.stop() first",
+                    null,
+                )
+            }
+            if (Mesh.radio != null && serving?.client !== client) {
+                // Rebind: the radio (and the node's sync) is bound to another Client object.
+                cancelWatchers()
+                Mesh.stop(app)
+                running = null
+            }
+            val radio = Mesh.start(app, client, options)
+            running = Running(client.installationId, client, options.dbPath)
             if (watchers.isEmpty()) watchers = watch(radio)
         }
     }
@@ -84,6 +106,7 @@ class MeshBridge(private val emit: (String, Map<String, Any?>) -> Unit) {
         lock.withLock {
             cancelWatchers()
             Mesh.stop(context.applicationContext)
+            running = null
         }
         emitStopped()
     }
@@ -113,6 +136,7 @@ class MeshBridge(private val emit: (String, Map<String, Any?>) -> Unit) {
         lock.withLock {
             cancelWatchers()
             Mesh.stop(app)
+            running = null
             between()
             if (inboxId != null) {
                 MeshNodeFiles.forInbox(app, inboxId).rotate()
@@ -128,7 +152,8 @@ class MeshBridge(private val emit: (String, Map<String, Any?>) -> Unit) {
      * generation when that inbox's libxmtp DB (in [dbDirectory], the app default when null)
      * does not exist yet, because the client is about to mint a new installation. Refuses with
      * E_MESH_BUSY instead of rotating a node that is still open ([openNodePaths]: the nodes of
-     * this module's live mesh clients): a rotation deletes the old generation's files.
+     * this module's live mesh clients; plus the running radio's): a rotation deletes the old
+     * generation's files.
      * Call only inside [withNodeLock].
      */
     fun nodeForClientLocked(
@@ -144,7 +169,8 @@ class MeshBridge(private val emit: (String, Map<String, Any?>) -> Unit) {
             dbDirectory?.let { File(it) } ?: MeshNodeFiles.defaultDbDirectory(app),
             inboxId,
         )
-        if (!libxmtpDb.exists() && files.current().absolutePath in openNodePaths) {
+        val current = files.current().absolutePath
+        if (!libxmtpDb.exists() && (current in openNodePaths || current == running?.nodePath)) {
             throw CodedException(
                 "E_MESH_BUSY",
                 "The mesh node for inbox $inboxId is still open; delete or drop its client first",
@@ -257,7 +283,13 @@ class MeshBridge(private val emit: (String, Map<String, Any?>) -> Unit) {
         receiverContext = context
     }
 
+    /** What the running radio serves (Ruling 10). */
+    private class Running(val installationId: String, val client: Client, val nodePath: String)
+
     companion object {
+        /** The (installation, Client, node) the running radio serves; process-wide like [lock]. */
+        private var running: Running? = null
+
         /**
          * Process-wide, like [Mesh] itself: XMTPModule (and this bridge) is recreated on every JS
          * reload, and a create still running in the old instance must serialize against a
