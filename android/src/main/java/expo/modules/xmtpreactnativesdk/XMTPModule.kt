@@ -12,6 +12,7 @@ import expo.modules.kotlin.exception.Exceptions
 import expo.modules.kotlin.functions.Coroutine
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
+import expo.modules.xmtpreactnativesdk.mesh.MeshBridge
 import expo.modules.xmtpreactnativesdk.wrappers.ArchiveMetadataWrapper
 import expo.modules.xmtpreactnativesdk.wrappers.AvailableArchiveWrapper
 import expo.modules.xmtpreactnativesdk.wrappers.AuthParamsWrapper
@@ -275,6 +276,8 @@ class XMTPModule : Module() {
         options.api.mesh?.let { meshOptions[client.installationId] = it }
     }
 
+    private val meshBridge = MeshBridge { name, body -> sendEvent(name, body) }
+
     private var xmtpPush: XMTPPush? = null
     private var signer: ReactNativeSigner? = null
     private val isDebugEnabled = BuildConfig.DEBUG // TODO: consider making this configurable
@@ -311,7 +314,11 @@ class XMTPModule : Module() {
             "conversationMessageClosed",
             "consentClosed",
             "preferencesClosed",
-            "messageDeletionClosed"
+            "messageDeletionClosed",
+            // pyrechat mesh
+            MeshBridge.EVENT_PEERS,
+            MeshBridge.EVENT_RADIO,
+            MeshBridge.EVENT_BLUETOOTH
         )
 
         Function("inboxId") { installationId: String ->
@@ -334,9 +341,44 @@ class XMTPModule : Module() {
                 logV(installationId)
                 logV(clients.toString())
                 val client = clients[installationId] ?: throw XMTPException("No client")
-                client.deleteLocalDatabase()
+                if (client.environment == XMTPEnvironment.MESH) {
+                    // The mesh node DB is bound to this installation for life (MeshNode::open):
+                    // stop the radio, delete, and point the next client at a fresh node DB.
+                    meshBridge.stop(context)
+                    val deleted = client.deleteLocalDatabase()
+                    meshBridge.rotate(context)
+                    meshOptions.remove(installationId)
+                    deleted
+                } else {
+                    client.deleteLocalDatabase()
+                }
             }
         }
+
+        // ---- pyrechat mesh (Android only; the JS side refuses 'mesh' elsewhere) ----
+
+        AsyncFunction("meshStart") Coroutine { installationId: String ->
+            withContext(Dispatchers.IO) {
+                val client = clients[installationId] ?: throw XMTPException("No client")
+                val options = meshOptions[installationId]
+                    ?: throw XMTPException("client $installationId was not created with env 'mesh'")
+                meshBridge.start(context, client, options)
+            }
+        }
+
+        AsyncFunction("meshStop") Coroutine { ->
+            withContext(Dispatchers.IO) { meshBridge.stop(context) }
+        }
+
+        AsyncFunction("meshResetNode") Coroutine { ->
+            withContext(Dispatchers.IO) { meshBridge.resetNode(context) }
+        }
+
+        Function("meshPeers") { -> meshBridge.peersJson() }
+
+        Function("meshRadioState") { -> meshBridge.radioJson() }
+
+        Function("meshSetPairingMode") { enabled: Boolean -> meshBridge.setPairingMode(enabled) }
 
         AsyncFunction("dropLocalDatabaseConnection") Coroutine { installationId: String ->
             withContext(Dispatchers.IO) {

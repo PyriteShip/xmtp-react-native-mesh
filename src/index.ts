@@ -90,6 +90,32 @@ export async function deleteLocalDatabase(installationId: InstallationId) {
   return await XMTPModule.deleteLocalDatabase(installationId)
 }
 
+// ---- pyrechat mesh (Android). Values arrive as JSON strings; see lib/meshCodec.ts.
+
+export async function meshStart(installationId: InstallationId): Promise<void> {
+  return await XMTPModule.meshStart(installationId)
+}
+
+export async function meshStop(): Promise<void> {
+  return await XMTPModule.meshStop()
+}
+
+export async function meshResetNode(): Promise<void> {
+  return await XMTPModule.meshResetNode()
+}
+
+export function meshPeersJson(): string {
+  return XMTPModule.meshPeers()
+}
+
+export function meshRadioStateJson(): string {
+  return XMTPModule.meshRadioState()
+}
+
+export function meshSetPairingMode(enabled: boolean): void {
+  XMTPModule.meshSetPairingMode(enabled)
+}
+
 export async function dropLocalDatabaseConnection(
   installationId: InstallationId
 ) {
@@ -484,6 +510,7 @@ export async function staticCanMessage(
   environment: XMTPEnvironment,
   peerIdentities: PublicIdentity[]
 ): Promise<{ [key: string]: boolean }> {
+  assertMeshSupported(environment, Platform.OS)
   const identities = peerIdentities.map((identity) => JSON.stringify(identity))
   return await XMTPModule.staticCanMessage(environment, identities)
 }
@@ -492,6 +519,7 @@ export async function staticInboxStatesForInboxIds(
   environment: XMTPEnvironment,
   inboxIds: InboxId[]
 ): Promise<InboxState[]> {
+  assertMeshSupported(environment, Platform.OS)
   const inboxStates = await XMTPModule.staticInboxStatesForInboxIds(
     environment,
     inboxIds
@@ -510,6 +538,7 @@ export async function staticRevokeInstallations(
   chainId?: number | undefined,
   blockNumber?: number | undefined
 ): Promise<void> {
+  assertMeshSupported(environment, Platform.OS)
   const walletParams: SignerParams = {
     signerType,
     chainId: typeof chainId === 'number' ? chainId : undefined,
@@ -530,6 +559,7 @@ export async function ffiStaticRevokeInstallationsSignatureText(
   inboxId: InboxId,
   installationIds: InstallationId[]
 ): Promise<string> {
+  assertMeshSupported(environment, Platform.OS)
   return await XMTPModule.ffiStaticRevokeInstallationsSignatureText(
     environment,
     JSON.stringify(identity),
@@ -542,6 +572,7 @@ export async function ffiStaticApplySignature(
   environment: XMTPEnvironment,
   signatureType: SignatureType
 ): Promise<void> {
+  assertMeshSupported(environment, Platform.OS)
   await XMTPModule.ffiStaticApplySignature(environment, signatureType)
 }
 
@@ -575,6 +606,7 @@ export async function staticKeyPackageStatuses(
   environment: XMTPEnvironment,
   installationIds: InstallationId[]
 ): Promise<KeyPackageStatuses> {
+  assertMeshSupported(environment, Platform.OS)
   const info = await XMTPModule.staticKeyPackageStatuses(
     environment,
     installationIds
@@ -618,6 +650,7 @@ export async function getOrCreateInboxId(
   publicIdentity: PublicIdentity,
   environment: XMTPEnvironment
 ): Promise<InboxId> {
+  assertMeshSupported(environment, Platform.OS)
   return await XMTPModule.getOrCreateInboxId(
     JSON.stringify(publicIdentity),
     environment
@@ -2065,6 +2098,13 @@ export {
   MESH_UNSUPPORTED_MESSAGE,
   assertMeshSupported,
 } from './lib/meshSupport'
+export { Mesh } from './lib/Mesh'
+export type {
+  MeshPeer,
+  MeshRadioState,
+  BluetoothStatus,
+  BluetoothAdapterState,
+} from './lib/meshCodec'
 export * from './lib/ContentCodec'
 export { Conversation, ConversationVersion } from './lib/Conversation'
 export { XMTPPush } from './lib/XMTPPush'
