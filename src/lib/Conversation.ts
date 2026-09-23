@@ -19,6 +19,7 @@ import {
   ConversationDebugInfo,
 } from '../index'
 import { CommitLogForkStatus } from './ConversationDebugInfo'
+import { SendResult } from './sendOutcome'
 import {
   DecodedMessageUnion,
   DecodedMessageUnionV2,
@@ -51,6 +52,16 @@ export interface ConversationBase<ContentTypes extends DefaultContentTypes> {
     content: ConversationSendPayload<SendContentTypes>,
     opts?: SendOptions
   ): Promise<MessageId>
+
+  /**
+   * Sends and reports `published`, or `queued` when libxmtp stored the message
+   * but could not confirm it yet (SyncFailedToWait; normal on the mesh for a DM
+   * this device did not create). Other failures reject.
+   */
+  sendWithStatus<SendContentTypes extends DefaultContentTypes = ContentTypes>(
+    content: ConversationSendPayload<SendContentTypes>,
+    opts?: SendOptions
+  ): Promise<SendResult<MessageId>>
 
   /**
    * Prepares a message to be sent, storing it locally.

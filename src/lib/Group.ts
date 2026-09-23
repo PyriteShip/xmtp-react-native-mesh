@@ -15,6 +15,7 @@ import {
   DisappearingMessageSettings,
   PublicIdentity,
 } from '../index'
+import { prepareThenPublish, SendResult } from './sendOutcome'
 import { ConversationSendPayload } from './types/ConversationCodecs'
 import {
   DecodedMessageUnion,
@@ -129,6 +130,25 @@ export class Group<
       console.info('ERROR in send()', e.message)
       throw e
     }
+  }
+
+  /**
+   * Like `send`, but reports whether the message was published or only stored.
+   * `status: 'queued'` means libxmtp stored it (Unpublished) and will deliver it
+   * later: on the Bluetooth mesh, when this DM's sequencer is reachable. It is
+   * not a failure; the stream echoes the message once it is published.
+   * Implemented as `prepareMessage` then `publishPreparedMessages`.
+   */
+  async sendWithStatus<
+    SendContentTypes extends DefaultContentTypes = ContentTypes,
+  >(
+    content: ConversationSendPayload<SendContentTypes>,
+    opts?: SendOptions
+  ): Promise<SendResult<MessageId>> {
+    return await prepareThenPublish<MessageId>(
+      () => this.prepareMessage<SendContentTypes>(content, opts),
+      () => this.publishPreparedMessages()
+    )
   }
 
   private async _sendWithJSCodec<T>(
