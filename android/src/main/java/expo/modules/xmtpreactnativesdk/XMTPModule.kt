@@ -343,10 +343,12 @@ class XMTPModule : Module() {
                 val client = clients[installationId] ?: throw XMTPException("No client")
                 if (client.environment == XMTPEnvironment.MESH) {
                     // The mesh node DB is bound to this installation for life (MeshNode::open):
-                    // stop the radio, delete, and point the next client at a fresh node DB.
-                    meshBridge.stop(context)
-                    val deleted = client.deleteLocalDatabase()
-                    meshBridge.rotate(context)
+                    // stop the radio, delete, and point the next client at a fresh node DB, all
+                    // under MeshBridge's single lock acquisition (Task 6 review, Ruling 6) so a
+                    // concurrent meshStart can never reopen the pre-rotation generation before
+                    // it is deleted.
+                    var deleted = false
+                    meshBridge.stopAndRotate(context) { deleted = client.deleteLocalDatabase() }
                     meshOptions.remove(installationId)
                     deleted
                 } else {
