@@ -19,7 +19,12 @@ export interface MeshRadioState {
   foreground: boolean
 }
 
-export type BluetoothAdapterState = 'on' | 'off' | 'unsupported'
+/** 'noPermission': BluetoothAdapter.isEnabled() needs BLUETOOTH_CONNECT on API 31+. */
+export type BluetoothAdapterState =
+  | 'on'
+  | 'off'
+  | 'unsupported'
+  | 'noPermission'
 
 export interface BluetoothStatus {
   adapter: BluetoothAdapterState
@@ -28,6 +33,9 @@ export interface BluetoothStatus {
 }
 
 const HEX = /^[0-9a-f]+$/
+
+/** A 32-byte installation id (XMTP's InstallationId), as 64 hex characters, either case. */
+const INSTALLATION_ID_HEX = /^[0-9a-fA-F]{64}$/
 
 function parse(json: unknown): unknown {
   if (typeof json !== 'string' || json === '') return undefined
@@ -78,7 +86,9 @@ export function parseBluetoothStatus(json: unknown): BluetoothStatus {
     return { adapter: 'unsupported', missingPermissions: [] }
   const { adapter, missingPermissions } = doc as Record<string, unknown>
   const state: BluetoothAdapterState =
-    adapter === 'on' || adapter === 'off' ? adapter : 'unsupported'
+    adapter === 'on' || adapter === 'off' || adapter === 'noPermission'
+      ? adapter
+      : 'unsupported'
   return {
     adapter: state,
     missingPermissions: parseStrings(JSON.stringify(missingPermissions ?? [])),
@@ -88,4 +98,14 @@ export function parseBluetoothStatus(json: unknown): BluetoothStatus {
 export function parseStrings(json: unknown): string[] {
   const doc = parse(json)
   return Array.isArray(doc) ? doc.filter(nonEmptyString) : []
+}
+
+/**
+ * True for a 32-byte installation id as hex (64 characters). `Mesh.canMessage` and the native
+ * `meshCanMessage` both validate the peer id this way before it reaches `hexToByteArray`
+ * (Task 8 review, Ruling 7): a bad id must reject with a clear error, not silently decode to
+ * garbage bytes and read back as `false`.
+ */
+export function isValidInstallationId(hex: unknown): hex is string {
+  return typeof hex === 'string' && INSTALLATION_ID_HEX.test(hex)
 }

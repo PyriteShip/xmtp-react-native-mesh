@@ -6,6 +6,7 @@ import {
   BluetoothStatus,
   MeshPeer,
   MeshRadioState,
+  isValidInstallationId,
   parseBluetoothStatus,
   parsePeers,
   parseRadioState,
@@ -66,12 +67,23 @@ export const Mesh = {
     XMTPModule.meshSetPairingMode(enabled)
   },
 
-  /** True once the local mesh node holds a valid key package for that installation. */
+  /**
+   * True once the local mesh node holds a valid key package for that installation.
+   * Rejects with code `E_BAD_INSTALLATION_ID` if `peerInstallationId` is not 32-byte hex
+   * (Task 8 review, Ruling 7) — validated here so a bad id never reaches native code, and
+   * again there (MeshBridge.canMessage) as the ultimate guard.
+   */
   async canMessage(
     installationId: InstallationId | string,
     peerInstallationId: string
   ): Promise<boolean> {
     assertAndroid()
+    if (!isValidInstallationId(peerInstallationId)) {
+      throw Object.assign(
+        new Error(`Not a 32-byte hex installation id: ${peerInstallationId}`),
+        { code: 'E_BAD_INSTALLATION_ID' }
+      )
+    }
     return await XMTPModule.meshCanMessage(
       installationId as InstallationId,
       peerInstallationId

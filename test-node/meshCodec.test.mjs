@@ -5,6 +5,7 @@ import {
   parseRadioState,
   parseBluetoothStatus,
   parseStrings,
+  isValidInstallationId,
 } from '../src/lib/meshCodec.ts'
 
 const A = { peerId: 'a1b2c3d4e5f60718#1', inboxId: 'inbox-a', installationId: 'aa'.repeat(32) }
@@ -51,7 +52,31 @@ test('parses Bluetooth status and defaults safely', () => {
   assert.deepEqual(parseBluetoothStatus('nope'), { adapter: 'unsupported', missingPermissions: [] })
 })
 
+// Task 8 review, Ruling 7 (item 3): BluetoothAdapter.isEnabled() can throw SecurityException
+// on API 31+ without BLUETOOTH_CONNECT; the native side reports that as adapter "noPermission",
+// which must round-trip, not collapse into "unsupported" like a truly unrecognised value.
+test('parses the Bluetooth "noPermission" adapter state', () => {
+  assert.deepEqual(parseBluetoothStatus(JSON.stringify({ adapter: 'noPermission' })), {
+    adapter: 'noPermission',
+    missingPermissions: [],
+  })
+})
+
 test('parses a permission list', () => {
   assert.deepEqual(parseStrings('["a","",3,"b"]'), ['a', 'b'])
   assert.deepEqual(parseStrings('{}'), [])
+})
+
+// Task 8 review, Ruling 7 (item 2): meshCanMessage must reject a malformed peer id instead of
+// silently passing garbage bytes to hexToByteArray (which would just make the call read false).
+test('validates a peer installation id as 32-byte hex', () => {
+  assert.equal(isValidInstallationId('aa'.repeat(32)), true)
+  assert.equal(isValidInstallationId('AA'.repeat(32)), true) // case-insensitive
+  assert.equal(isValidInstallationId('ab'), false) // too short
+  assert.equal(isValidInstallationId('a'.repeat(63)), false) // odd length, wrong size
+  assert.equal(isValidInstallationId('a'.repeat(65)), false) // too long
+  assert.equal(isValidInstallationId('gg'.repeat(32)), false) // not hex
+  assert.equal(isValidInstallationId(''), false)
+  assert.equal(isValidInstallationId(undefined), false)
+  assert.equal(isValidInstallationId(null), false)
 })

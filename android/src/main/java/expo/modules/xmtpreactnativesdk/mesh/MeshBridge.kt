@@ -9,11 +9,13 @@ import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.os.Build
 import androidx.core.content.ContextCompat
+import expo.modules.kotlin.exception.CodedException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -46,6 +48,11 @@ import org.xmtp.android.library.mesh.policy.MeshPermissions
  * rotate as two separate calls. Do not call back into this MeshBridge (`start`, `stop`,
  * `resetNode`, `stopAndRotate`) from [between]: this lock is not reentrant, and doing so would
  * deadlock.
+ *
+ * Presence/radio watcher creation and cancellation also happen inside this same lock acquisition
+ * (Task 8 review, Ruling 7): a concurrent [start] and [stopAndRotate] that touched the watcher
+ * list outside the lock could leave watchers bound to a radio that has already been stopped and
+ * rotated away, with nothing left to cancel them.
  */
 class MeshBridge(private val emit: (String, Map<String, Any?>) -> Unit) {
     private val lock = Mutex()
@@ -59,16 +66,18 @@ class MeshBridge(private val emit: (String, Map<String, Any?>) -> Unit) {
      * collectors serves it; a repeated start adds none.
      */
     suspend fun start(context: Context, client: Client, options: MeshOptions) {
-        val radio = lock.withLock { Mesh.start(context.applicationContext, client, options) }
-        synchronized(this) {
+        lock.withLock {
+            val radio = Mesh.start(context.applicationContext, client, options)
             if (watchers.isEmpty()) watchers = watch(radio)
         }
     }
 
     /** Stops sync, the radio and the foreground service; tells JS nobody is nearby. */
     suspend fun stop(context: Context) {
-        cancelWatchers()
-        lock.withLock { Mesh.stop(context.applicationContext) }
+        lock.withLock {
+            cancelWatchers()
+            Mesh.stop(context.applicationContext)
+        }
         emitStopped()
     }
 
@@ -84,9 +93,9 @@ class MeshBridge(private val emit: (String, Map<String, Any?>) -> Unit) {
      * separate calls instead of this one.
      */
     suspend fun stopAndRotate(context: Context, between: suspend () -> Unit = {}) {
-        cancelWatchers()
         val app = context.applicationContext
         lock.withLock {
+            cancelWatchers()
             Mesh.stop(app)
             between()
             MeshNodeFiles.inAppFiles(app).rotate()
@@ -102,9 +111,22 @@ class MeshBridge(private val emit: (String, Map<String, Any?>) -> Unit) {
 
     fun radioJson(): String = MeshJson.radio(Mesh.radio?.radioUp?.value ?: false, Mesh.foreground.value)
 
-    /** The key-package gate (SP2 I2): true once the local node holds a valid package for the peer. */
-    suspend fun canMessage(client: Client, peerInstallationIdHex: String): Boolean =
-        client.meshCanMessage(peerInstallationIdHex.hexToByteArray())
+    /**
+     * The key-package gate (SP2 I2): true once the local node holds a valid package for the peer.
+     * Validates [peerInstallationIdHex] as 32-byte hex first (Task 8 review, Ruling 7):
+     * `hexToByteArray` would otherwise silently decode a malformed id into garbage bytes and the
+     * call would just read back as `false` instead of surfacing the caller's mistake.
+     */
+    suspend fun canMessage(client: Client, peerInstallationIdHex: String): Boolean {
+        if (!INSTALLATION_ID_HEX.matches(peerInstallationIdHex)) {
+            throw CodedException(
+                "E_BAD_INSTALLATION_ID",
+                "Not a 32-byte hex installation id: $peerInstallationIdHex",
+                null,
+            )
+        }
+        return client.meshCanMessage(peerInstallationIdHex.hexToByteArray())
+    }
 
     /** Also starts watching the adapter, so later changes arrive as bluetoothState events. */
     fun bluetoothJson(context: Context): String {
@@ -120,14 +142,14 @@ class MeshBridge(private val emit: (String, Map<String, Any?>) -> Unit) {
         if (ctx != null && receiver != null) runCatching { ctx.unregisterReceiver(receiver) }
         bluetoothReceiver = null
         receiverContext = null
+        watchers = emptyList()
         scope.cancel()
     }
 
-    private fun cancelWatchers() {
-        synchronized(this) {
-            watchers.forEach { it.cancel() }
-            watchers = emptyList()
-        }
+    /** Must be called from inside a [lock] acquisition (Task 8 review, Ruling 7). */
+    private suspend fun cancelWatchers() {
+        watchers.forEach { it.cancelAndJoin() }
+        watchers = emptyList()
     }
 
     private fun emitStopped() {
@@ -150,8 +172,15 @@ class MeshBridge(private val emit: (String, Map<String, Any?>) -> Unit) {
         val adapter = context.getSystemService(BluetoothManager::class.java)?.adapter
         val state = when {
             adapter == null -> "unsupported"
-            adapter.isEnabled -> "on"
-            else -> "off"
+            else ->
+                try {
+                    if (adapter.isEnabled) "on" else "off"
+                } catch (e: SecurityException) {
+                    // isEnabled() is annotated @RequiresPermission(BLUETOOTH_CONNECT) on API 31+;
+                    // some OEMs enforce it at the binder call instead of just logging a warning
+                    // (Task 8 review, Ruling 7).
+                    "noPermission"
+                }
         }
         val missing = MeshPermissions.required(Build.VERSION.SDK_INT).filter {
             context.checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED
@@ -181,5 +210,8 @@ class MeshBridge(private val emit: (String, Map<String, Any?>) -> Unit) {
         const val EVENT_PEERS = "meshPeers"
         const val EVENT_RADIO = "meshRadio"
         const val EVENT_BLUETOOTH = "bluetoothState"
+
+        /** A 32-byte installation id (XMTP's InstallationId) as 64 hex characters, either case. */
+        private val INSTALLATION_ID_HEX = Regex("^[0-9a-fA-F]{64}$")
     }
 }
