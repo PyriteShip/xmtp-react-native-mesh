@@ -81,6 +81,7 @@ import org.xmtp.android.library.libxmtp.PermissionOption
 import org.xmtp.android.library.libxmtp.PublicIdentity
 import org.xmtp.android.library.libxmtp.SignatureRequest
 import org.xmtp.android.library.MessageVisibilityOptions
+import org.xmtp.android.library.mesh.MeshOptions
 import org.xmtp.android.library.messages.PrivateKeyBuilder
 import org.xmtp.android.library.push.Service
 import org.xmtp.android.library.push.XMTPPush
@@ -177,7 +178,13 @@ class XMTPModule : Module() {
             return reactContext
         }
 
-    private fun apiEnvironments(env: String, customLocalUrl: String? = null, appVersion: String? = null, gatewayHost: String? = null): ClientOptions.Api {
+    private fun apiEnvironments(
+        env: String,
+        customLocalUrl: String? = null,
+        appVersion: String? = null,
+        gatewayHost: String? = null,
+        mesh: MeshOptions? = null,
+    ): ClientOptions.Api {
         return when (env) {
             "local" -> {
                 if (customLocalUrl.isNullOrBlank()) {
@@ -204,6 +211,18 @@ class XMTPModule : Module() {
                 gatewayHost = gatewayHost,
             )
 
+            // pyrechat: the local mesh node answers every API call; nothing leaves the phone.
+            // A static call has no database key to open the node with, so it fails here
+            // rather than falling through to DEV below.
+            "mesh" -> ClientOptions.Api(
+                env = XMTPEnvironment.MESH,
+                isSecure = false,
+                appVersion = appVersion,
+                mesh = mesh ?: throw XMTPException(
+                    "XMTP env 'mesh' needs a client's database key; static calls are not supported under mesh"
+                ),
+            )
+
             else -> ClientOptions.Api(
                 env = XMTPEnvironment.DEV,
                 isSecure = true,
@@ -227,12 +246,17 @@ class XMTPModule : Module() {
             dbEncryptionKey.foldIndexed(ByteArray(dbEncryptionKey.size)) { i, a, v ->
                 a.apply { set(i, v.toByte()) }
             }
+        // The mesh node shares the client's database key; its file is per installation
+        // (MeshNodeFiles; rotated by deleteLocalDatabase under mesh).
+        val mesh =
+            if (authOptions.environment == "mesh") MeshOptions.currentNode(context, encryptionKeyBytes) else null
         return ClientOptions(
             api = apiEnvironments(
                 authOptions.environment,
                 authOptions.customLocalUrl,
                 authOptions.appVersion,
                 authOptions.gatewayHost,
+                mesh,
             ),
             preAuthenticateToInboxCallback = preAuthenticateToInboxCallback,
             appContext = context,
@@ -244,6 +268,13 @@ class XMTPModule : Module() {
     }
 
     private var clients: MutableMap<String, Client> = mutableMapOf()
+    /** MeshOptions each 'mesh' client was created with, for meshStart (same node, same key). */
+    private val meshOptions: MutableMap<String, MeshOptions> = mutableMapOf()
+
+    private fun rememberMesh(client: Client, options: ClientOptions) {
+        options.api.mesh?.let { meshOptions[client.installationId] = it }
+    }
+
     private var xmtpPush: XMTPPush? = null
     private var signer: ReactNativeSigner? = null
     private val isDebugEnabled = BuildConfig.DEBUG // TODO: consider making this configurable
@@ -364,6 +395,7 @@ class XMTPModule : Module() {
 
                 ContentJson.Companion
                 clients[randomClient.installationId] = randomClient
+                rememberMesh(randomClient, options)
                 ClientWrapper.encodeToObj(randomClient)
             }
         }
@@ -390,6 +422,7 @@ class XMTPModule : Module() {
                 val client =
                     Client.create(account = reactSigner, options = options)
                 clients[client.installationId] = client
+                rememberMesh(client, options)
                 ContentJson.Companion
                 signer = null
                 sendEvent("authed", ClientWrapper.encodeToObj(client))
@@ -411,6 +444,7 @@ class XMTPModule : Module() {
                 )
                 ContentJson.Companion
                 clients[client.installationId] = client
+                rememberMesh(client, options)
                 ClientWrapper.encodeToObj(client)
             }
         }
@@ -429,6 +463,7 @@ class XMTPModule : Module() {
                 )
                 ContentJson.Companion
                 clients[client.installationId] = client
+                rememberMesh(client, options)
                 ClientWrapper.encodeToObj(client)
             }
         }

@@ -1,5 +1,6 @@
 import { content, keystore } from '@xmtp/proto'
 import { EventEmitter, NativeModulesProxy } from 'expo-modules-core'
+import { Platform } from 'react-native'
 
 import XMTPModule from './XMTPModule'
 import { ArchiveMetadata, AvailableArchive } from './lib/ArchiveOptions'
@@ -33,6 +34,7 @@ import {
   KeyPackageStatuses,
   NetworkDebugInfo,
 } from './lib/XMTPDebugInformation'
+import { assertMeshSupported } from './lib/meshSupport'
 import {
   ConversationOptions,
   ConversationFilterType,
@@ -133,7 +135,7 @@ export async function receiveSignature(requestID: string, signature: string) {
 }
 
 export async function createRandom(
-  environment: 'local' | 'dev' | 'production',
+  environment: XMTPEnvironment,
   dbEncryptionKey: Uint8Array,
   hasPreAuthenticateToInboxCallback?: boolean | undefined,
   dbDirectory?: string | undefined,
@@ -144,6 +146,7 @@ export async function createRandom(
   gatewayHost?: string | undefined,
   forkRecoveryOptions?: ForkRecoveryOptions | undefined
 ): Promise<string> {
+  assertMeshSupported(environment, Platform.OS)
   const authParams: AuthParams = {
     environment,
     dbDirectory,
@@ -166,7 +169,7 @@ export async function createRandom(
 
 export async function create(
   identity: PublicIdentity,
-  environment: 'local' | 'dev' | 'production',
+  environment: XMTPEnvironment,
   dbEncryptionKey: Uint8Array,
   hasPreAuthenticateToInboxCallback?: boolean | undefined,
   dbDirectory?: string | undefined,
@@ -180,6 +183,7 @@ export async function create(
   gatewayHost?: string | undefined,
   forkRecoveryOptions?: ForkRecoveryOptions | undefined
 ): Promise<string> {
+  assertMeshSupported(environment, Platform.OS)
   const authParams: AuthParams = {
     environment,
     dbDirectory,
@@ -209,7 +213,7 @@ export async function create(
 
 export async function build(
   identity: PublicIdentity,
-  environment: 'local' | 'dev' | 'production',
+  environment: XMTPEnvironment,
   dbEncryptionKey: Uint8Array,
   dbDirectory?: string | undefined,
   inboxId?: InboxId | undefined,
@@ -220,6 +224,7 @@ export async function build(
   gatewayHost?: string | undefined,
   forkRecoveryOptions?: ForkRecoveryOptions | undefined
 ): Promise<string> {
+  assertMeshSupported(environment, Platform.OS)
   const authParams: AuthParams = {
     environment,
     dbDirectory,
@@ -243,7 +248,7 @@ export async function build(
 
 export async function ffiCreateClient(
   identity: PublicIdentity,
-  environment: 'local' | 'dev' | 'production',
+  environment: XMTPEnvironment,
   dbEncryptionKey: Uint8Array,
   dbDirectory?: string | undefined,
   customLocalHost?: string | undefined,
@@ -253,6 +258,7 @@ export async function ffiCreateClient(
   gatewayHost?: string | undefined,
   forkRecoveryOptions?: ForkRecoveryOptions | undefined
 ): Promise<string> {
+  assertMeshSupported(environment, Platform.OS)
   const authParams: AuthParams = {
     environment,
     dbDirectory,
@@ -2054,6 +2060,11 @@ interface CreateGroupParams {
 }
 
 export { Client } from './lib/Client'
+export {
+  MESH_FORK_VERSION,
+  MESH_UNSUPPORTED_MESSAGE,
+  assertMeshSupported,
+} from './lib/meshSupport'
 export * from './lib/ContentCodec'
 export { Conversation, ConversationVersion } from './lib/Conversation'
 export { XMTPPush } from './lib/XMTPPush'

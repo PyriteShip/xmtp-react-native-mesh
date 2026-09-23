@@ -1233,7 +1233,7 @@ export class Client<
   }
 }
 
-export type XMTPEnvironment = 'local' | 'dev' | 'production'
+export type XMTPEnvironment = 'local' | 'dev' | 'production' | 'mesh'
 export type SignatureType = 'revokeInstallations'
 
 export type ForkRecoveryPolicy = 'none' | 'all' | 'groups'
