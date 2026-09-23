@@ -382,6 +382,19 @@ class XMTPModule : Module() {
 
         Function("meshSetPairingMode") { enabled: Boolean -> meshBridge.setPairingMode(enabled) }
 
+        AsyncFunction("meshCanMessage") Coroutine { installationId: String, peerInstallationId: String ->
+            withContext(Dispatchers.IO) {
+                val client = clients[installationId] ?: throw XMTPException("No client")
+                meshBridge.canMessage(client, peerInstallationId)
+            }
+        }
+
+        Function("meshBluetoothStatus") { -> meshBridge.bluetoothJson(context) }
+
+        Function("meshRequestedPermissions") { -> meshBridge.requestedPermissionsJson() }
+
+        OnDestroy { meshBridge.dispose() }
+
         AsyncFunction("dropLocalDatabaseConnection") Coroutine { installationId: String ->
             withContext(Dispatchers.IO) {
                 val client = clients[installationId] ?: throw XMTPException("No client")

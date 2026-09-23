@@ -116,6 +116,21 @@ export function meshSetPairingMode(enabled: boolean): void {
   XMTPModule.meshSetPairingMode(enabled)
 }
 
+export async function meshCanMessage(
+  installationId: InstallationId,
+  peerInstallationId: string
+): Promise<boolean> {
+  return await XMTPModule.meshCanMessage(installationId, peerInstallationId)
+}
+
+export function meshBluetoothStatusJson(): string {
+  return XMTPModule.meshBluetoothStatus()
+}
+
+export function meshRequestedPermissionsJson(): string {
+  return XMTPModule.meshRequestedPermissions()
+}
+
 export async function dropLocalDatabaseConnection(
   installationId: InstallationId
 ) {
