@@ -10,6 +10,7 @@ import androidx.core.net.toUri
 import com.google.protobuf.kotlin.toByteString
 import expo.modules.kotlin.exception.Exceptions
 import expo.modules.kotlin.functions.Coroutine
+import expo.modules.kotlin.exception.CodedException
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 import expo.modules.xmtpreactnativesdk.mesh.MeshBridge
@@ -379,8 +380,20 @@ class XMTPModule : Module() {
                     // under MeshBridge's single lock acquisition (Task 6 review, Ruling 6) so a
                     // concurrent meshStart can never reopen the pre-rotation generation before
                     // it is deleted.
+                    //
+                    // The node rotates only once the libxmtp DB file is really gone (SP3 final
+                    // review M2): otherwise the kept installation would reopen on an empty node.
                     var deleted = false
-                    meshBridge.stopAndRotate(context, client.inboxId) { deleted = client.deleteLocalDatabase() }
+                    meshBridge.stopAndRotate(context, client.inboxId) {
+                        deleted = client.deleteLocalDatabase()
+                        if (File(client.dbPath).exists()) {
+                            throw CodedException(
+                                "E_MESH_DB_NOT_DELETED",
+                                "Could not delete ${client.dbPath}; the mesh node was not rotated",
+                                null,
+                            )
+                        }
+                    }
                     meshOptions.remove(installationId)
                     deleted
                 } else {
@@ -767,6 +780,9 @@ class XMTPModule : Module() {
             withContext(Dispatchers.IO) {
                 logV("dropClient")
                 clients.remove(installationId)
+                // SP3 final review M3: forget its mesh node and stop a radio that serves it.
+                meshOptions.remove(installationId)
+                meshBridge.stopIfServing(context, installationId)
                 Unit
             }
         }

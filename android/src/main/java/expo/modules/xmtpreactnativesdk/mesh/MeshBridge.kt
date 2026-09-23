@@ -107,8 +107,24 @@ class MeshBridge(private val emit: (String, Map<String, Any?>) -> Unit) {
             cancelWatchers()
             Mesh.stop(context.applicationContext)
             running = null
+            // Inside the lock (SP3 final review M1): emitted after the lock, this could follow a
+            // concurrent start's "up" and leave JS showing the radio down.
+            emitStopped()
         }
-        emitStopped()
+    }
+
+    /**
+     * Stops the radio only if it serves [installationId] (SP3 final review M3): a dropped client
+     * must not stay pinned by the node → sync → client cycle, serving a Client JS no longer holds.
+     */
+    suspend fun stopIfServing(context: Context, installationId: String) {
+        lock.withLock {
+            if (running?.installationId != installationId) return@withLock
+            cancelWatchers()
+            Mesh.stop(context.applicationContext)
+            running = null
+            emitStopped()
+        }
     }
 
     /**
@@ -134,17 +150,22 @@ class MeshBridge(private val emit: (String, Map<String, Any?>) -> Unit) {
     ) {
         val app = context.applicationContext
         lock.withLock {
-            cancelWatchers()
-            Mesh.stop(app)
-            running = null
-            between()
-            if (inboxId != null) {
-                MeshNodeFiles.forInbox(app, inboxId).rotate()
-            } else {
-                MeshNodeFiles.rotateAll(MeshNodeFiles.defaultDbDirectory(app))
+            try {
+                cancelWatchers()
+                Mesh.stop(app)
+                running = null
+                between()
+                if (inboxId != null) {
+                    MeshNodeFiles.forInbox(app, inboxId).rotate()
+                } else {
+                    MeshNodeFiles.rotateAll(MeshNodeFiles.defaultDbDirectory(app))
+                }
+            } finally {
+                // Inside the lock (M1), and even when `between` throws (M2): the watchers are
+                // gone either way, so JS must not keep its last "up" and peer list.
+                emitStopped()
             }
         }
-        emitStopped()
     }
 
     /**
