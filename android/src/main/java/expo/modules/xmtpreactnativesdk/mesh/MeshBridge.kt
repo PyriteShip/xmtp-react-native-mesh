@@ -158,7 +158,7 @@ class MeshBridge(private val emit: (String, Map<String, Any?>) -> Unit) {
                 if (inboxId != null) {
                     MeshNodeFiles.forInbox(app, inboxId).rotate()
                 } else {
-                    MeshNodeFiles.rotateAll(MeshNodeFiles.defaultDbDirectory(app))
+                    MeshNodeFiles.rotateAll(MeshNodeFiles.defaultDbDirectory(app), app)
                 }
             } finally {
                 // Inside the lock (M1), and even when `between` throws (M2): the watchers are
