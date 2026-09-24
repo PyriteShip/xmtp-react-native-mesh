@@ -90,7 +90,7 @@ export async function deleteLocalDatabase(installationId: InstallationId) {
   return await XMTPModule.deleteLocalDatabase(installationId)
 }
 
-// ---- pyrechat mesh (Android). Values arrive as JSON strings; see lib/meshCodec.ts.
+// ---- xmtp-mesh (Android). Values arrive as JSON strings; see lib/meshCodec.ts.
 
 export async function meshStart(installationId: InstallationId): Promise<void> {
   return await XMTPModule.meshStart(installationId)

@@ -1,4 +1,4 @@
-// pyrechat: local-only ambient shim so `tsc --noEmit` can resolve `Platform.OS`
+// xmtp-mesh: local-only ambient shim so `tsc --noEmit` can resolve `Platform.OS`
 // (src/index.ts) without the full `react-native` package installed here.
 // `react-native` is a peerDependency ("*"): this fork's own package.json has no
 // devDependency on it and none is installed in this repo (unlike `example/`,

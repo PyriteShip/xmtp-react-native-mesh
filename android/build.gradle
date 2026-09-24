@@ -89,7 +89,7 @@ android {
 }
 
 repositories {
-  // pyrechat: org.xmtp:android:*-mesh.* comes from ~/.m2
+  // xmtp-mesh: org.xmtp:android:*-mesh.* comes from ~/.m2
   // (~/libxmtp-android/sdks/android/dev/publish-mesh-local). Limited to org.xmtp.
   mavenLocal { content { includeGroup "org.xmtp" } }
   mavenCentral()
@@ -98,7 +98,7 @@ repositories {
 dependencies {
   implementation project(':expo-modules-core')
   implementation "org.jetbrains.kotlin:kotlin-stdlib-jdk7:${getKotlinVersion()}"
-  implementation "org.xmtp:android:4.10.0-rc2-mesh.3"
+  implementation "org.xmtp:android:4.10.0-rc2-mesh.4"
   implementation 'com.google.code.gson:gson:2.10.1'
   implementation 'com.facebook.react:react-native:0.71.3'
   implementation "com.daveanthonythomas.moshipack:moshipack:1.0.1"

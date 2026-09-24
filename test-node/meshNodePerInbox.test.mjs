@@ -49,9 +49,9 @@ function functionBody(src, signature, label) {
   return blockAfter(src, from)
 }
 
-test('the fork pins AAR 4.10.0-rc2-mesh.3', () => {
-  assert.match(gradle, /implementation "org\.xmtp:android:4\.10\.0-rc2-mesh\.3"/)
-  assert.doesNotMatch(gradle, /4\.10\.0-rc2-mesh\.2/)
+test('the fork pins AAR 4.10.0-rc2-mesh.4', () => {
+  assert.match(gradle, /implementation "org\.xmtp:android:4\.10\.0-rc2-mesh\.4"/)
+  assert.doesNotMatch(gradle, /4\.10\.0-rc2-mesh\.3/)
 })
 
 test('clientOptions picks the node for the inbox, not a device-wide one', () => {

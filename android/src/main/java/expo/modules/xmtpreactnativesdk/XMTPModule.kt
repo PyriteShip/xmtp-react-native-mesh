@@ -214,7 +214,7 @@ class XMTPModule : Module() {
                 gatewayHost = gatewayHost,
             )
 
-            // pyrechat: the local mesh node answers every API call; nothing leaves the phone.
+            // xmtp-mesh: the local mesh node answers every API call; nothing leaves the phone.
             // A static call has no database key to open the node with, so it fails here
             // rather than falling through to DEV below.
             "mesh" -> ClientOptions.Api(
@@ -348,7 +348,7 @@ class XMTPModule : Module() {
             "consentClosed",
             "preferencesClosed",
             "messageDeletionClosed",
-            // pyrechat mesh
+            // xmtp-mesh
             MeshBridge.EVENT_PEERS,
             MeshBridge.EVENT_RADIO,
             MeshBridge.EVENT_BLUETOOTH
@@ -402,7 +402,7 @@ class XMTPModule : Module() {
             }
         }
 
-        // ---- pyrechat mesh (Android only; the JS side refuses 'mesh' elsewhere) ----
+        // ---- xmtp-mesh (Android only; the JS side refuses 'mesh' elsewhere) ----
 
         AsyncFunction("meshStart") Coroutine { installationId: String ->
             withContext(Dispatchers.IO) {

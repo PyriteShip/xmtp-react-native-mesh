@@ -1,5 +1,5 @@
 /**
- * pyrechat fork of @xmtp/react-native-sdk 5.7.0: XMTP over a Bluetooth mesh
+ * xmtp-mesh fork of @xmtp/react-native-sdk 5.7.0: XMTP over a Bluetooth mesh
  * (env 'mesh', Android only). package.json keeps "5.7.0" so hosts whose peer
  * range is ^5.7.0 still resolve it; this constant names the fork.
  *

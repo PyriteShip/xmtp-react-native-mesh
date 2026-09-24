@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Build, check and pack this fork for ~/pyrechat/mobile.
-#   dev/pack-for-pyrechat <dest-dir>   -> <dest-dir>/xmtp-react-native-sdk-mesh.tgz
+# Build, check and pack this fork for ~/pyritechat/mobile.
+#   dev/pack-for-app <dest-dir>   -> <dest-dir>/xmtp-react-native-sdk-mesh.tgz
 # npm pack runs the package's `prepare` (expo-module prepare), which compiles src/ to build/.
 set -euo pipefail
-DEST="${1:?usage: dev/pack-for-pyrechat <dest-dir>}"
+DEST="${1:?usage: dev/pack-for-app <dest-dir>}"
 cd "$(dirname "$0")/.."
 YARN=(node .yarn/releases/yarn-4.10.3.cjs)
 "${YARN[@]}" install --immutable
@@ -17,5 +17,5 @@ mv -f "$DEST/$TGZ" "$DEST/xmtp-react-native-sdk-mesh.tgz"
 # SIGPIPE and the pipeline reports non-zero even when the file is present.
 TARBALL_ENTRIES="$(tar -tzf "$DEST/xmtp-react-native-sdk-mesh.tgz")"
 grep -q 'package/build/lib/meshSupport.js' <<<"$TARBALL_ENTRIES" \
-  || { echo "pack-for-pyrechat: build/lib/meshSupport.js missing from the tarball" >&2; exit 1; }
+  || { echo "pack-for-app: build/lib/meshSupport.js missing from the tarball" >&2; exit 1; }
 echo "packed $DEST/xmtp-react-native-sdk-mesh.tgz"
