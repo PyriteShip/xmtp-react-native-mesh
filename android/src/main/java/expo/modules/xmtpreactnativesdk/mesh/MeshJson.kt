@@ -5,6 +5,7 @@ import org.xmtp.android.library.mesh.MeshIdentityEvent
 import org.xmtp.android.library.mesh.MeshIdentityOutcome
 import org.xmtp.android.library.mesh.MeshRelayState
 import org.xmtp.android.library.toHex
+import uniffi.xmtpv3.FfiMeshStats
 import uniffi.xmtpv3.FfiRelayStats
 import uniffi.xmtpv3.FfiVerifiedPeer
 
@@ -66,6 +67,23 @@ internal object MeshJson {
                     "delivered" to s.delivered.toLong(),
                     "deliveredUnspooled" to s.deliveredUnspooled.toLong(),
                     "refsSent" to s.refsSent.toLong(),
+                )
+            )
+        }
+
+    fun meshStats(s: FfiMeshStats?): String =
+        if (s == null) {
+            "null"
+        } else {
+            gson.toJson(
+                mapOf(
+                    "seqRowsSigned" to s.seqRowsSigned.toLong(),
+                    "seqRowsVerified" to s.seqRowsVerified.toLong(),
+                    "seqRejectedMissingProof" to s.seqRejectedMissingProof.toLong(),
+                    "seqRejectedBadSignature" to s.seqRejectedBadSignature.toLong(),
+                    "seqRejectedWrongSigner" to s.seqRejectedWrongSigner.toLong(),
+                    "seqEquivocations" to s.seqEquivocations.toLong(),
+                    "peersRejectedVersion" to s.peersRejectedVersion.toLong(),
                 )
             )
         }

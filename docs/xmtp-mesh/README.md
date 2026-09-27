@@ -19,6 +19,9 @@ verified in the simulator; multi-hop on three or more real phones is not yet tes
   `setPairingMode()`.
 - **Relay**: `setRelayEnabled()`, `relayState()`, `relayStats()`, and a `meshRelay` event, for
   the multi-hop store-and-forward relay described in the design doc's Part R.
+- **Signed sequencing**: `stats()` returns the order-check counters (rows signed and checked,
+  rows refused by reason, peers refused for an older version), described in the design doc's
+  §B13. A mesh.10 phone syncs only with mesh.10 phones.
 - **Events**: `addPeersListener`, `addRadioListener`, `addBluetoothListener`, `addRelayListener`,
   `addIdentityListener` (restore convergence: `reloaded` / `rebaseNeeded` /
   `tooManyInstallations`).

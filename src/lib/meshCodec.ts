@@ -158,6 +158,43 @@ export function parseRelayStats(json: unknown): MeshRelayStats | null {
   return out
 }
 
+/**
+ * Signed-sequencing counters of the running node (the libxmtp fork's DESIGN.md §B13),
+ * counted since the node was opened.
+ */
+export interface MeshStats {
+  /** Rows this node signed: as it ordered them, or at start for rows it held unsigned. */
+  seqRowsSigned: number
+  /** Rows from other phones whose signature was checked and accepted. */
+  seqRowsVerified: number
+  /** Frames refused: a row had no signature. */
+  seqRejectedMissingProof: number
+  /** Frames refused: a signature did not match the row. */
+  seqRejectedBadSignature: number
+  /** Frames refused: signed by an installation that may not order this group. */
+  seqRejectedWrongSigner: number
+  /** Two different rows signed by one installation at the same place, kept as proof. */
+  seqEquivocations: number
+  /** Peers refused for speaking an older protocol version (mesh.10 syncs only with mesh.10). */
+  peersRejectedVersion: number
+}
+
+const MESH_STAT_KEYS: (keyof MeshStats)[] = [
+  'seqRowsSigned', 'seqRowsVerified', 'seqRejectedMissingProof', 'seqRejectedBadSignature',
+  'seqRejectedWrongSigner', 'seqEquivocations', 'peersRejectedVersion',
+]
+
+export function parseMeshStats(json: unknown): MeshStats | null {
+  const v = parse(json) as Record<string, unknown> | null | undefined
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return null
+  const out = {} as MeshStats
+  for (const k of MESH_STAT_KEYS) {
+    const n = v[k]
+    out[k] = typeof n === 'number' && Number.isFinite(n) ? n : 0
+  }
+  return out
+}
+
 /** What the client did after the mesh node replaced an inbox's identity log (restore convergence). */
 export type MeshIdentityOutcome = 'reloaded' | 'rebaseNeeded' | 'tooManyInstallations'
 

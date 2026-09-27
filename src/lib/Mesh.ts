@@ -9,9 +9,11 @@ import {
   MeshRadioState,
   MeshRelayState,
   MeshRelayStats,
+  MeshStats,
   isValidInstallationId,
   parseBluetoothStatus,
   parseIdentityEvent,
+  parseMeshStats,
   parsePeers,
   parseRadioState,
   parseRelayState,
@@ -71,6 +73,15 @@ export const Mesh = {
   relayStats(): MeshRelayStats | null {
     assertAndroid()
     return parseRelayStats(XMTPModule.meshRelayStatsJson())
+  },
+
+  /**
+   * Signed-sequencing counters (order checks) since the node was opened; null while
+   * stopped. A snapshot: call it when you need it, don't poll.
+   */
+  stats(): MeshStats | null {
+    assertAndroid()
+    return parseMeshStats(XMTPModule.meshStatsJson())
   },
 
   async stop(): Promise<void> {

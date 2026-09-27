@@ -108,6 +108,10 @@ export function meshRelayStatsJson(): string {
   return XMTPModule.meshRelayStats()
 }
 
+export function meshStatsJson(): string {
+  return XMTPModule.meshStats()
+}
+
 export async function meshStop(): Promise<void> {
   return await XMTPModule.meshStop()
 }
@@ -2154,6 +2158,7 @@ export type {
   MeshIdentityOutcome,
   MeshRelayState,
   MeshRelayStats,
+  MeshStats,
 } from './lib/meshCodec'
 export {
   isSendError,

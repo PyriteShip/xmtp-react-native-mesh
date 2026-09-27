@@ -437,6 +437,8 @@ class XMTPModule : Module() {
 
         Function("meshRelayStats") { -> meshBridge.relayStatsJson() }
 
+        Function("meshStats") { -> meshBridge.meshStatsJson() }
+
         Function("meshSetPairingMode") { enabled: Boolean -> meshBridge.setPairingMode(enabled) }
 
         AsyncFunction("meshCanMessage") Coroutine { installationId: String, peerInstallationId: String ->

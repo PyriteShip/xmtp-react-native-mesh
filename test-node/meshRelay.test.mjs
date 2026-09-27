@@ -45,6 +45,6 @@ test('the bridge watches Mesh.relay and resets it on stop', () => {
   assert.match(bridge, /Mesh\.start\(app, client, options, relay = relay\)/)
 })
 
-test('the AAR pin is mesh.9', () => {
-  assert.match(read('../android/build.gradle'), /org\.xmtp:android:4\.10\.0-rc2-mesh\.9/)
+test('the AAR pin is mesh.10', () => {
+  assert.match(read('../android/build.gradle'), /org\.xmtp:android:4\.10\.0-rc2-mesh\.10"/)
 })

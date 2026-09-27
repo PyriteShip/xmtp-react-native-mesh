@@ -228,6 +228,9 @@ class MeshBridge(private val emit: (String, Map<String, Any?>) -> Unit) {
 
     fun relayStatsJson(): String = MeshJson.relayStats(Mesh.relayStats())
 
+    /** Signed-sequencing counters of the running node; "null" while stopped. */
+    fun meshStatsJson(): String = MeshJson.meshStats(Mesh.stats())
+
     /**
      * The key-package gate: true once the local node holds a valid package for the peer.
      * Validates [peerInstallationIdHex] as 32-byte hex first: `hexToByteArray` would otherwise
