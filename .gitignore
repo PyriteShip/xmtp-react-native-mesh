@@ -63,7 +63,8 @@ android/keystores/debug.keystore
 .env
 
 # Typedocs
-docs/
+docs/*
+!docs/xmtp-mesh/
 # Yarn Berry: ignore cache and state, but commit .yarn/releases so the pinned version is used
 **/.yarn/cache
 **/.yarn/unplugged

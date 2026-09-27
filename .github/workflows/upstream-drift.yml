@@ -1,0 +1,183 @@
+# Weekly: replay the xmtp-mesh stack onto the newest upstream xmtp-react-native vX.Y.Z
+# tag, then run `npm run test:node` (no install needed). A conflict or a failure opens
+# or updates ONE issue labelled upstream-drift. Scripts live in .github/xmtp-mesh/.
+name: upstream-drift
+
+on:
+  schedule:
+    - cron: '41 5 * * 1' # Mondays 05:41 UTC
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Upstream tag to replay onto (empty = newest vX.Y.Z or vX.Y.Z-rcN)
+        type: string
+        default: ''
+      force:
+        description: Run even if this tag and stack tip were already checked
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: upstream-drift
+  cancel-in-progress: false
+
+jobs:
+  drift:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      UPSTREAM_URL: https://github.com/xmtp/xmtp-react-native.git
+      TAG_PREFIX: v
+      KEEP_UPSTREAM: ''
+      GH_TOKEN: ${{ github.token }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      TAG_INPUT: ${{ inputs.tag }}
+      FORCE: ${{ inputs.force && 'true' || 'false' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 32
+
+      - name: Resolve the tag, base and stack tip
+        id: plan
+        run: |
+          set -euo pipefail
+          cp -r .github/xmtp-mesh "$RUNNER_TEMP/xm"
+          base=$(sed -n 's/^Base commit: \([0-9a-f]\{40\}\)$/\1/p' PATCHES.md)
+          base_tag=$(sed -n 's/^Base tag: \(.*\)$/\1/p' PATCHES.md)
+          [ -n "$base" ] || { echo "::error::PATCHES.md has no Base commit line"; exit 1; }
+          git cat-file -e "$base^{commit}" 2>/dev/null || git fetch -q --deepen=200 origin
+          tag=$TAG_INPUT
+          if [ -n "$tag" ]; then
+            [[ $tag =~ ^[A-Za-z0-9._-]+$ ]] || { echo "::error::bad tag input"; exit 1; }
+          else
+            tag=$(git ls-remote --tags --refs "$UPSTREAM_URL" "refs/tags/${TAG_PREFIX}*" \
+              | sed 's|.*refs/tags/||' | "$RUNNER_TEMP/xm/newest-tag.sh" "$TAG_PREFIX")
+          fi
+          skip=false
+          if [ -z "$TAG_INPUT" ] && [ "$tag" = "$base_tag" ]; then
+            echo "::notice::No drift: the newest upstream tag, $tag, is the stack's base."
+            skip=true
+          fi
+          {
+            echo "tag=$tag"
+            echo "base=$base"
+            echo "stack=$(git rev-parse HEAD)"
+            echo "skip=$skip"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Look for an earlier check of this tag and stack tip
+        id: marker
+        if: steps.plan.outputs.skip != 'true'
+        uses: actions/cache/restore@v4
+        with:
+          path: .drift-marker
+          key: drift-${{ steps.plan.outputs.tag }}-${{ steps.plan.outputs.stack }}
+          lookup-only: true
+
+      - name: Decide whether to run
+        id: gate
+        env:
+          SKIP: ${{ steps.plan.outputs.skip }}
+          HIT: ${{ steps.marker.outputs.cache-hit }}
+        run: |
+          if [ "$SKIP" = true ]; then run=false
+          elif [ "$HIT" = true ] && [ "$FORCE" != true ]; then
+            echo "::notice::This tag and stack tip were already checked. Dispatch with force to re-run."
+            run=false
+          else run=true; fi
+          echo "run=$run" >> "$GITHUB_OUTPUT"
+
+      - name: Check that PATCHES.md lists every edited upstream file
+        if: steps.gate.outputs.run == 'true'
+        run: |
+          "$RUNNER_TEMP/xm/check-patches.sh" PATCHES.md HEAD > "$RUNNER_TEMP/patches.txt" 2>&1 \
+            && rm "$RUNNER_TEMP/patches.txt" || true
+
+      - name: Replay the stack onto the upstream tag
+        id: replay
+        if: steps.gate.outputs.run == 'true'
+        env:
+          TAG: ${{ steps.plan.outputs.tag }}
+          BASE: ${{ steps.plan.outputs.base }}
+          STACK: ${{ steps.plan.outputs.stack }}
+        run: |
+          set -euo pipefail
+          git config user.name "xmtp-mesh drift"
+          git config user.email "drift@users.noreply.github.com"
+          git fetch -q --no-tags --depth=1 "$UPSTREAM_URL" "refs/tags/$TAG:refs/tags/$TAG"
+          pin=$(git show "refs/tags/$TAG:android/build.gradle" | grep -o "org\.xmtp:android:[^\"'[:space:]]*" || true)
+          echo "pin=${pin:-unknown}" >> "$GITHUB_OUTPUT"
+          rc=0
+          "$RUNNER_TEMP/xm/drift.sh" "$BASE" "$STACK" "refs/tags/$TAG" "$RUNNER_TEMP/report.md" || rc=$?
+          case $rc in
+            0) echo "status=applied" >> "$GITHUB_OUTPUT" ;;
+            2) echo "status=conflict" >> "$GITHUB_OUTPUT" ;;
+            *) echo "status=error" >> "$GITHUB_OUTPUT"; exit "$rc" ;;
+          esac
+
+      - uses: actions/setup-node@v4
+        if: steps.replay.outputs.status == 'applied'
+        with:
+          node-version: '22'
+
+      - name: Run the Node tests
+        id: tests
+        if: steps.replay.outputs.status == 'applied'
+        run: |
+          rc=0
+          timeout 5m npm run test:node > "$RUNNER_TEMP/node-tests.log" 2>&1 || rc=$?
+          if [ "$rc" -eq 0 ]; then s=ok; else s=failed; fi
+          echo "status=$s" >> "$GITHUB_OUTPUT"
+
+      - name: Report
+        id: report
+        if: always() && steps.gate.outputs.run == 'true'
+        env:
+          TAG: ${{ steps.plan.outputs.tag }}
+          PIN: ${{ steps.replay.outputs.pin }}
+          REPLAY: ${{ steps.replay.outputs.status }}
+          TESTS: ${{ steps.tests.outputs.status }}
+        run: |
+          set -euo pipefail
+          if [ "$REPLAY" = conflict ]; then status=conflict
+          elif [ "$REPLAY" != applied ] || [ "$TESTS" != ok ]; then status=test-failure
+          else status=ok; fi
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          body="$RUNNER_TEMP/body.md"
+          {
+            if [ -s "$RUNNER_TEMP/report.md" ]; then cat "$RUNNER_TEMP/report.md"
+            else echo "The run stopped before the replay finished (replay: ${REPLAY:-not run})."; fi
+            echo
+            echo "Upstream \`$TAG\` pins \`${PIN:-unknown}\`. This fork pins the libxmtp fork's AAR (see PATCHES.md); a newer upstream pin means the libxmtp fork needs rebasing onto that android tag too."
+            echo
+            echo "Node tests: ${TESTS:-not run}."
+            if [ -s "$RUNNER_TEMP/patches.txt" ]; then
+              echo; echo '### PATCHES.md is stale'; echo '```'; cat "$RUNNER_TEMP/patches.txt"; echo '```'
+            fi
+            if [ -s "$RUNNER_TEMP/node-tests.log" ]; then
+              echo; echo "<details><summary>node-tests.log (last 120 lines)</summary>"; echo
+              echo '```'; tail -n 120 "$RUNNER_TEMP/node-tests.log"; echo '```'; echo '</details>'
+            fi
+            echo; echo "Run: $RUN_URL"
+          } | head -c 60000 > "$body"
+          cat "$body" >> "$GITHUB_STEP_SUMMARY"
+          "$RUNNER_TEMP/xm/report-issue.sh" "$status" "$TAG" "$body"
+          case $status in ok) exit 0 ;; *) exit 1 ;; esac
+
+      - name: Write the marker
+        if: always() && steps.report.outputs.status != ''
+        env:
+          STATUS: ${{ steps.report.outputs.status }}
+        run: echo "$STATUS" > .drift-marker
+
+      - name: Remember this tag and stack tip
+        if: always() && steps.report.outputs.status != ''
+        uses: actions/cache/save@v4
+        with:
+          path: .drift-marker
+          key: drift-${{ steps.plan.outputs.tag }}-${{ steps.plan.outputs.stack }}

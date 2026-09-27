@@ -10,8 +10,10 @@ import androidx.core.net.toUri
 import com.google.protobuf.kotlin.toByteString
 import expo.modules.kotlin.exception.Exceptions
 import expo.modules.kotlin.functions.Coroutine
+import expo.modules.kotlin.exception.CodedException
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
+import expo.modules.xmtpreactnativesdk.mesh.MeshBridge
 import expo.modules.xmtpreactnativesdk.wrappers.ArchiveMetadataWrapper
 import expo.modules.xmtpreactnativesdk.wrappers.AvailableArchiveWrapper
 import expo.modules.xmtpreactnativesdk.wrappers.AuthParamsWrapper
@@ -81,12 +83,14 @@ import org.xmtp.android.library.libxmtp.PermissionOption
 import org.xmtp.android.library.libxmtp.PublicIdentity
 import org.xmtp.android.library.libxmtp.SignatureRequest
 import org.xmtp.android.library.MessageVisibilityOptions
+import org.xmtp.android.library.mesh.MeshOptions
 import org.xmtp.android.library.messages.PrivateKeyBuilder
 import org.xmtp.android.library.push.Service
 import org.xmtp.android.library.push.XMTPPush
 import uniffi.xmtpv3.FfiKeyPackageStatus
 import uniffi.xmtpv3.FfiLogLevel
 import uniffi.xmtpv3.FfiLogRotation
+import uniffi.xmtpv3.generateInboxId
 import java.io.BufferedReader
 import java.io.File
 import java.io.InputStreamReader
@@ -177,7 +181,13 @@ class XMTPModule : Module() {
             return reactContext
         }
 
-    private fun apiEnvironments(env: String, customLocalUrl: String? = null, appVersion: String? = null, gatewayHost: String? = null): ClientOptions.Api {
+    private fun apiEnvironments(
+        env: String,
+        customLocalUrl: String? = null,
+        appVersion: String? = null,
+        gatewayHost: String? = null,
+        mesh: MeshOptions? = null,
+    ): ClientOptions.Api {
         return when (env) {
             "local" -> {
                 if (customLocalUrl.isNullOrBlank()) {
@@ -204,6 +214,18 @@ class XMTPModule : Module() {
                 gatewayHost = gatewayHost,
             )
 
+            // xmtp-mesh: the local mesh node answers every API call; nothing leaves the phone.
+            // A static call has no database key to open the node with, so it fails here
+            // rather than falling through to DEV below.
+            "mesh" -> ClientOptions.Api(
+                env = XMTPEnvironment.MESH,
+                isSecure = false,
+                appVersion = appVersion,
+                mesh = mesh ?: throw XMTPException(
+                    "XMTP env 'mesh' needs a client's database key; static calls are not supported under mesh"
+                ),
+            )
+
             else -> ClientOptions.Api(
                 env = XMTPEnvironment.DEV,
                 isSecure = true,
@@ -217,6 +239,7 @@ class XMTPModule : Module() {
         dbEncryptionKey: List<Int>,
         authParams: String,
         hasPreAuthenticateToInboxCallback: Boolean? = null,
+        meshInboxId: String? = null,
     ): ClientOptions {
         if (hasPreAuthenticateToInboxCallback == true)
             preAuthenticateToInboxCallbackDeferred = CompletableDeferred()
@@ -227,12 +250,26 @@ class XMTPModule : Module() {
             dbEncryptionKey.foldIndexed(ByteArray(dbEncryptionKey.size)) { i, a, v ->
                 a.apply { set(i, v.toByte()) }
             }
+        // The mesh node shares the client's database key; its file is per inbox and follows
+        // that inbox's libxmtp DB: a fresh node when the DB does not exist yet.
+        // Called inside meshClientCreation's node lock.
+        val mesh =
+            if (authOptions.environment == "mesh") {
+                meshBridge.nodeForClientLocked(
+                    context,
+                    meshInboxId ?: throw XMTPException("XMTP env 'mesh' needs the client's inbox id"),
+                    encryptionKeyBytes,
+                    authOptions.dbDirectory,
+                    openNodePaths = meshOptions.values.map { it.dbPath },
+                )
+            } else null
         return ClientOptions(
             api = apiEnvironments(
                 authOptions.environment,
                 authOptions.customLocalUrl,
                 authOptions.appVersion,
                 authOptions.gatewayHost,
+                mesh,
             ),
             preAuthenticateToInboxCallback = preAuthenticateToInboxCallback,
             appContext = context,
@@ -244,6 +281,35 @@ class XMTPModule : Module() {
     }
 
     private var clients: MutableMap<String, Client> = mutableMapOf()
+    /** MeshOptions each 'mesh' client was created with, for meshStart (same node, same key). */
+    private val meshOptions: MutableMap<String, MeshOptions> = mutableMapOf()
+
+    private fun rememberMesh(client: Client, options: ClientOptions) {
+        options.api.mesh?.let { meshOptions[client.installationId] = it }
+    }
+
+    private val meshBridge = MeshBridge { name, body -> sendEvent(name, body) }
+
+    /**
+     * Under env 'mesh', [clientOptions] (which picks the node file) and the Client call that
+     * opens and binds that node run inside [MeshBridge.withNodeLock], the lock a node rotation
+     * holds, so a rotate can never land between them. Under the mesh both are local and quick;
+     * a JS signer's signature request is answered through `receiveSignature`, which takes no
+     * lock. Other envs run [block] directly.
+     */
+    private suspend fun <T> meshClientCreation(authParams: String, block: suspend () -> T): T {
+        if (AuthParamsWrapper.authParamsFromJson(authParams).environment != "mesh") return block()
+        return meshBridge.withNodeLock { MeshBridge.mapNodeMismatch { block() } }
+    }
+
+    /**
+     * The inbox a mesh client is about to open, computed locally: libxmtp's
+     * `createFfiClient` always uses nonce 0, and under the mesh `getOrCreateInboxId` falls back
+     * to the same `generateInboxId(identity, 0)` for an identity the node has not seen.
+     */
+    private fun meshInboxIdFor(identity: PublicIdentity): String =
+        generateInboxId(identity.ffiPrivate, 0uL)
+
     private var xmtpPush: XMTPPush? = null
     private var signer: ReactNativeSigner? = null
     private val isDebugEnabled = BuildConfig.DEBUG // TODO: consider making this configurable
@@ -280,7 +346,13 @@ class XMTPModule : Module() {
             "conversationMessageClosed",
             "consentClosed",
             "preferencesClosed",
-            "messageDeletionClosed"
+            "messageDeletionClosed",
+            // xmtp-mesh
+            MeshBridge.EVENT_PEERS,
+            MeshBridge.EVENT_RADIO,
+            MeshBridge.EVENT_BLUETOOTH,
+            MeshBridge.EVENT_IDENTITY,
+            MeshBridge.EVENT_RELAY
         )
 
         Function("inboxId") { installationId: String ->
@@ -303,9 +375,82 @@ class XMTPModule : Module() {
                 logV(installationId)
                 logV(clients.toString())
                 val client = clients[installationId] ?: throw XMTPException("No client")
-                client.deleteLocalDatabase()
+                if (client.environment == XMTPEnvironment.MESH) {
+                    // The mesh node DB is bound to this installation for life (MeshNode::open):
+                    // stop the radio, delete, and point the next client at a fresh node DB, all
+                    // under MeshBridge's single lock acquisition so a concurrent meshStart can
+                    // never reopen the pre-rotation generation before it is deleted.
+                    //
+                    // The node rotates only once the libxmtp DB file is really gone: otherwise
+                    // the kept installation would reopen on an empty node.
+                    var deleted = false
+                    // Reset fix: carry the inbox's identity log into the next node generation
+                    // with this client's mesh key, so the next installation extends the log
+                    // peers hold instead of re-creating the inbox (which they refuse).
+                    val carryKey = meshOptions[installationId]?.encryptionKey
+                    meshBridge.stopAndRotate(context, client.inboxId, carryKey) {
+                        deleted = client.deleteLocalDatabase()
+                        if (File(client.dbPath).exists()) {
+                            throw CodedException(
+                                "E_MESH_DB_NOT_DELETED",
+                                "Could not delete ${client.dbPath}; the mesh node was not rotated",
+                                null,
+                            )
+                        }
+                    }
+                    meshOptions.remove(installationId)
+                    deleted
+                } else {
+                    client.deleteLocalDatabase()
+                }
             }
         }
+
+        // ---- xmtp-mesh (Android only; the JS side refuses 'mesh' elsewhere) ----
+
+        AsyncFunction("meshStart") Coroutine { installationId: String, relay: Boolean ->
+            withContext(Dispatchers.IO) {
+                val client = clients[installationId] ?: throw XMTPException("No client")
+                val options = meshOptions[installationId]
+                    ?: throw XMTPException("client $installationId was not created with env 'mesh'")
+                MeshBridge.mapNodeMismatch { meshBridge.start(context, client, options, relay) }
+            }
+        }
+
+        AsyncFunction("meshStop") Coroutine { ->
+            withContext(Dispatchers.IO) { meshBridge.stop(context) }
+        }
+
+        AsyncFunction("meshResetNode") Coroutine { inboxId: String? ->
+            withContext(Dispatchers.IO) { meshBridge.resetNode(context, inboxId) }
+        }
+
+        Function("meshPeers") { -> meshBridge.peersJson() }
+
+        Function("meshRadioState") { -> meshBridge.radioJson() }
+
+        AsyncFunction("meshSetRelayEnabled") Coroutine { enabled: Boolean ->
+            withContext(Dispatchers.IO) { meshBridge.setRelayEnabled(enabled) }
+        }
+
+        Function("meshRelayState") { -> meshBridge.relayJson() }
+
+        Function("meshRelayStats") { -> meshBridge.relayStatsJson() }
+
+        Function("meshSetPairingMode") { enabled: Boolean -> meshBridge.setPairingMode(enabled) }
+
+        AsyncFunction("meshCanMessage") Coroutine { installationId: String, peerInstallationId: String ->
+            withContext(Dispatchers.IO) {
+                val client = clients[installationId] ?: throw XMTPException("No client")
+                meshBridge.canMessage(client, peerInstallationId)
+            }
+        }
+
+        Function("meshBluetoothStatus") { -> meshBridge.bluetoothJson(context) }
+
+        Function("meshRequestedPermissions") { -> meshBridge.requestedPermissionsJson() }
+
+        OnDestroy { meshBridge.dispose() }
 
         AsyncFunction("dropLocalDatabaseConnection") Coroutine { installationId: String ->
             withContext(Dispatchers.IO) {
@@ -354,16 +499,19 @@ class XMTPModule : Module() {
             withContext(Dispatchers.IO) {
                 logV("createRandom")
                 val privateKey = PrivateKeyBuilder()
-                val options = clientOptions(
-                    dbEncryptionKey,
-                    authParams,
-                    hasPreAuthenticateToInboxCallback,
-                )
-                val randomClient =
-                    Client.create(account = privateKey, options = options)
+                val (randomClient, options) = meshClientCreation(authParams) {
+                    val options = clientOptions(
+                        dbEncryptionKey,
+                        authParams,
+                        hasPreAuthenticateToInboxCallback,
+                        meshInboxId = meshInboxIdFor(privateKey.publicIdentity),
+                    )
+                    Client.create(account = privateKey, options = options) to options
+                }
 
                 ContentJson.Companion
                 clients[randomClient.installationId] = randomClient
+                rememberMesh(randomClient, options)
                 ClientWrapper.encodeToObj(randomClient)
             }
         }
@@ -382,14 +530,17 @@ class XMTPModule : Module() {
                     blockNumber = walletOptions.blockNumber
                 )
                 signer = reactSigner
-                val options = clientOptions(
-                    dbEncryptionKey,
-                    authParams,
-                    hasAuthInboxCallback,
-                )
-                val client =
-                    Client.create(account = reactSigner, options = options)
+                val (client, options) = meshClientCreation(authParams) {
+                    val options = clientOptions(
+                        dbEncryptionKey,
+                        authParams,
+                        hasAuthInboxCallback,
+                        meshInboxId = meshInboxIdFor(identity),
+                    )
+                    Client.create(account = reactSigner, options = options) to options
+                }
                 clients[client.installationId] = client
+                rememberMesh(client, options)
                 ContentJson.Companion
                 signer = null
                 sendEvent("authed", ClientWrapper.encodeToObj(client))
@@ -399,18 +550,22 @@ class XMTPModule : Module() {
         AsyncFunction("build") Coroutine { publicIdentity: String, inboxId: String?, dbEncryptionKey: List<Int>, authParams: String ->
             withContext(Dispatchers.IO) {
                 logV("build")
-                val options = clientOptions(
-                    dbEncryptionKey,
-                    authParams,
-                )
                 val identity = PublicIdentityWrapper.publicIdentityFromJson(publicIdentity)
-                val client = Client.build(
-                    publicIdentity = identity,
-                    options = options,
-                    inboxId = inboxId,
-                )
+                val (client, options) = meshClientCreation(authParams) {
+                    val options = clientOptions(
+                        dbEncryptionKey,
+                        authParams,
+                        meshInboxId = inboxId ?: meshInboxIdFor(identity),
+                    )
+                    Client.build(
+                        publicIdentity = identity,
+                        options = options,
+                        inboxId = inboxId,
+                    ) to options
+                }
                 ContentJson.Companion
                 clients[client.installationId] = client
+                rememberMesh(client, options)
                 ClientWrapper.encodeToObj(client)
             }
         }
@@ -418,17 +573,21 @@ class XMTPModule : Module() {
         AsyncFunction("ffiCreateClient") Coroutine { publicIdentity: String, dbEncryptionKey: List<Int>, authParams: String ->
             withContext(Dispatchers.IO) {
                 logV("ffiCreateClient")
-                val options = clientOptions(
-                    dbEncryptionKey,
-                    authParams,
-                )
                 val identity = PublicIdentityWrapper.publicIdentityFromJson(publicIdentity)
-                val client = Client.ffiCreateClient(
-                    publicIdentity = identity,
-                    clientOptions = options,
-                )
+                val (client, options) = meshClientCreation(authParams) {
+                    val options = clientOptions(
+                        dbEncryptionKey,
+                        authParams,
+                        meshInboxId = meshInboxIdFor(identity),
+                    )
+                    Client.ffiCreateClient(
+                        publicIdentity = identity,
+                        clientOptions = options,
+                    ) to options
+                }
                 ContentJson.Companion
                 clients[client.installationId] = client
+                rememberMesh(client, options)
                 ClientWrapper.encodeToObj(client)
             }
         }
@@ -521,6 +680,31 @@ class XMTPModule : Module() {
 
                 client.revokeAllOtherInstallations(reactSigner)
                 signer = null
+            }
+        }
+
+        // xmtp-mesh restore convergence: after the node replaced this inbox's identity log, add this
+        // installation to the winning log, signed by the JS signer (same flow as the revoke above).
+        AsyncFunction("meshRebaseInstallation") Coroutine { installationId: String, walletParams: String, publicIdentity: String ->
+            withContext(Dispatchers.IO) {
+                logV("meshRebaseInstallation")
+                val client = clients[installationId] ?: throw XMTPException("No client")
+                val walletOptions = WalletParamsWrapper.walletParamsFromJson(walletParams)
+                val identity = PublicIdentityWrapper.publicIdentityFromJson(publicIdentity)
+                val reactSigner =
+                    ReactNativeSigner(
+                        module = this@XMTPModule,
+                        publicIdentity = identity,
+                        type = walletOptions.signerType,
+                        chainId = walletOptions.chainId,
+                        blockNumber = walletOptions.blockNumber
+                    )
+                signer = reactSigner
+                try {
+                    MeshBridge.mapTooManyInstallations { client.meshRebaseInstallation(reactSigner) }
+                } finally {
+                    signer = null
+                }
             }
         }
 
@@ -633,6 +817,9 @@ class XMTPModule : Module() {
             withContext(Dispatchers.IO) {
                 logV("dropClient")
                 clients.remove(installationId)
+                // Forget its mesh node and stop a radio that serves it.
+                meshOptions.remove(installationId)
+                meshBridge.stopIfServing(context, installationId)
                 Unit
             }
         }

@@ -89,13 +89,17 @@ android {
 }
 
 repositories {
+  // xmtp-mesh: org.xmtp:android:*-mesh.* is built from the xmtp-mesh libxmtp fork and
+  // published to the local Maven repo (~/.m2); see its docs/xmtp-mesh/README.md for how to
+  // build and install it. Limited to org.xmtp.
+  mavenLocal { content { includeGroup "org.xmtp" } }
   mavenCentral()
 }
 
 dependencies {
   implementation project(':expo-modules-core')
   implementation "org.jetbrains.kotlin:kotlin-stdlib-jdk7:${getKotlinVersion()}"
-  implementation "org.xmtp:android:4.10.0-rc2"
+  implementation "org.xmtp:android:4.10.0-rc2-mesh.9"
   implementation 'com.google.code.gson:gson:2.10.1'
   implementation 'com.facebook.react:react-native:0.71.3'
   implementation "com.daveanthonythomas.moshipack:moshipack:1.0.1"

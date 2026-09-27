@@ -1,5 +1,6 @@
 import { content, keystore } from '@xmtp/proto'
 import { EventEmitter, NativeModulesProxy } from 'expo-modules-core'
+import { Platform } from 'react-native'
 
 import XMTPModule from './XMTPModule'
 import { ArchiveMetadata, AvailableArchive } from './lib/ArchiveOptions'
@@ -33,6 +34,7 @@ import {
   KeyPackageStatuses,
   NetworkDebugInfo,
 } from './lib/XMTPDebugInformation'
+import { assertMeshSupported } from './lib/meshSupport'
 import {
   ConversationOptions,
   ConversationFilterType,
@@ -88,6 +90,59 @@ export async function deleteLocalDatabase(installationId: InstallationId) {
   return await XMTPModule.deleteLocalDatabase(installationId)
 }
 
+// ---- xmtp-mesh (Android). Values arrive as JSON strings; see lib/meshCodec.ts.
+
+export async function meshStart(installationId: InstallationId, relay: boolean): Promise<void> {
+  return await XMTPModule.meshStart(installationId, relay)
+}
+
+export async function meshSetRelayEnabled(enabled: boolean): Promise<void> {
+  return await XMTPModule.meshSetRelayEnabled(enabled)
+}
+
+export function meshRelayStateJson(): string {
+  return XMTPModule.meshRelayState()
+}
+
+export function meshRelayStatsJson(): string {
+  return XMTPModule.meshRelayStats()
+}
+
+export async function meshStop(): Promise<void> {
+  return await XMTPModule.meshStop()
+}
+
+export async function meshResetNode(inboxId?: string): Promise<void> {
+  return await XMTPModule.meshResetNode(inboxId ?? null)
+}
+
+export function meshPeersJson(): string {
+  return XMTPModule.meshPeers()
+}
+
+export function meshRadioStateJson(): string {
+  return XMTPModule.meshRadioState()
+}
+
+export function meshSetPairingMode(enabled: boolean): void {
+  XMTPModule.meshSetPairingMode(enabled)
+}
+
+export async function meshCanMessage(
+  installationId: InstallationId,
+  peerInstallationId: string
+): Promise<boolean> {
+  return await XMTPModule.meshCanMessage(installationId, peerInstallationId)
+}
+
+export function meshBluetoothStatusJson(): string {
+  return XMTPModule.meshBluetoothStatus()
+}
+
+export function meshRequestedPermissionsJson(): string {
+  return XMTPModule.meshRequestedPermissions()
+}
+
 export async function dropLocalDatabaseConnection(
   installationId: InstallationId
 ) {
@@ -133,7 +188,7 @@ export async function receiveSignature(requestID: string, signature: string) {
 }
 
 export async function createRandom(
-  environment: 'local' | 'dev' | 'production',
+  environment: XMTPEnvironment,
   dbEncryptionKey: Uint8Array,
   hasPreAuthenticateToInboxCallback?: boolean | undefined,
   dbDirectory?: string | undefined,
@@ -144,6 +199,7 @@ export async function createRandom(
   gatewayHost?: string | undefined,
   forkRecoveryOptions?: ForkRecoveryOptions | undefined
 ): Promise<string> {
+  assertMeshSupported(environment, Platform.OS)
   const authParams: AuthParams = {
     environment,
     dbDirectory,
@@ -166,7 +222,7 @@ export async function createRandom(
 
 export async function create(
   identity: PublicIdentity,
-  environment: 'local' | 'dev' | 'production',
+  environment: XMTPEnvironment,
   dbEncryptionKey: Uint8Array,
   hasPreAuthenticateToInboxCallback?: boolean | undefined,
   dbDirectory?: string | undefined,
@@ -180,6 +236,7 @@ export async function create(
   gatewayHost?: string | undefined,
   forkRecoveryOptions?: ForkRecoveryOptions | undefined
 ): Promise<string> {
+  assertMeshSupported(environment, Platform.OS)
   const authParams: AuthParams = {
     environment,
     dbDirectory,
@@ -209,7 +266,7 @@ export async function create(
 
 export async function build(
   identity: PublicIdentity,
-  environment: 'local' | 'dev' | 'production',
+  environment: XMTPEnvironment,
   dbEncryptionKey: Uint8Array,
   dbDirectory?: string | undefined,
   inboxId?: InboxId | undefined,
@@ -220,6 +277,7 @@ export async function build(
   gatewayHost?: string | undefined,
   forkRecoveryOptions?: ForkRecoveryOptions | undefined
 ): Promise<string> {
+  assertMeshSupported(environment, Platform.OS)
   const authParams: AuthParams = {
     environment,
     dbDirectory,
@@ -243,7 +301,7 @@ export async function build(
 
 export async function ffiCreateClient(
   identity: PublicIdentity,
-  environment: 'local' | 'dev' | 'production',
+  environment: XMTPEnvironment,
   dbEncryptionKey: Uint8Array,
   dbDirectory?: string | undefined,
   customLocalHost?: string | undefined,
@@ -253,6 +311,7 @@ export async function ffiCreateClient(
   gatewayHost?: string | undefined,
   forkRecoveryOptions?: ForkRecoveryOptions | undefined
 ): Promise<string> {
+  assertMeshSupported(environment, Platform.OS)
   const authParams: AuthParams = {
     environment,
     dbDirectory,
@@ -345,6 +404,25 @@ export async function revokeAllOtherInstallations(
     blockNumber: typeof blockNumber === 'number' ? blockNumber : undefined,
   }
   return XMTPModule.revokeAllOtherInstallations(
+    installationId,
+    JSON.stringify(signerParams),
+    JSON.stringify(identity)
+  )
+}
+
+export async function meshRebaseInstallation(
+  installationId: InstallationId,
+  identity: PublicIdentity,
+  signerType?: SignerType | undefined,
+  chainId?: number | undefined,
+  blockNumber?: number | undefined
+): Promise<boolean> {
+  const signerParams: SignerParams = {
+    signerType,
+    chainId: typeof chainId === 'number' ? chainId : undefined,
+    blockNumber: typeof blockNumber === 'number' ? blockNumber : undefined,
+  }
+  return await XMTPModule.meshRebaseInstallation(
     installationId,
     JSON.stringify(signerParams),
     JSON.stringify(identity)
@@ -478,6 +556,7 @@ export async function staticCanMessage(
   environment: XMTPEnvironment,
   peerIdentities: PublicIdentity[]
 ): Promise<{ [key: string]: boolean }> {
+  assertMeshSupported(environment, Platform.OS)
   const identities = peerIdentities.map((identity) => JSON.stringify(identity))
   return await XMTPModule.staticCanMessage(environment, identities)
 }
@@ -486,6 +565,7 @@ export async function staticInboxStatesForInboxIds(
   environment: XMTPEnvironment,
   inboxIds: InboxId[]
 ): Promise<InboxState[]> {
+  assertMeshSupported(environment, Platform.OS)
   const inboxStates = await XMTPModule.staticInboxStatesForInboxIds(
     environment,
     inboxIds
@@ -504,6 +584,7 @@ export async function staticRevokeInstallations(
   chainId?: number | undefined,
   blockNumber?: number | undefined
 ): Promise<void> {
+  assertMeshSupported(environment, Platform.OS)
   const walletParams: SignerParams = {
     signerType,
     chainId: typeof chainId === 'number' ? chainId : undefined,
@@ -524,6 +605,7 @@ export async function ffiStaticRevokeInstallationsSignatureText(
   inboxId: InboxId,
   installationIds: InstallationId[]
 ): Promise<string> {
+  assertMeshSupported(environment, Platform.OS)
   return await XMTPModule.ffiStaticRevokeInstallationsSignatureText(
     environment,
     JSON.stringify(identity),
@@ -536,6 +618,7 @@ export async function ffiStaticApplySignature(
   environment: XMTPEnvironment,
   signatureType: SignatureType
 ): Promise<void> {
+  assertMeshSupported(environment, Platform.OS)
   await XMTPModule.ffiStaticApplySignature(environment, signatureType)
 }
 
@@ -569,6 +652,7 @@ export async function staticKeyPackageStatuses(
   environment: XMTPEnvironment,
   installationIds: InstallationId[]
 ): Promise<KeyPackageStatuses> {
+  assertMeshSupported(environment, Platform.OS)
   const info = await XMTPModule.staticKeyPackageStatuses(
     environment,
     installationIds
@@ -612,6 +696,7 @@ export async function getOrCreateInboxId(
   publicIdentity: PublicIdentity,
   environment: XMTPEnvironment
 ): Promise<InboxId> {
+  assertMeshSupported(environment, Platform.OS)
   return await XMTPModule.getOrCreateInboxId(
     JSON.stringify(publicIdentity),
     environment
@@ -2054,6 +2139,28 @@ interface CreateGroupParams {
 }
 
 export { Client } from './lib/Client'
+export {
+  MESH_FORK_VERSION,
+  MESH_UNSUPPORTED_MESSAGE,
+  assertMeshSupported,
+} from './lib/meshSupport'
+export { Mesh } from './lib/Mesh'
+export type {
+  MeshPeer,
+  MeshRadioState,
+  BluetoothStatus,
+  BluetoothAdapterState,
+  MeshIdentityEvent,
+  MeshIdentityOutcome,
+  MeshRelayState,
+  MeshRelayStats,
+} from './lib/meshCodec'
+export {
+  isSendError,
+  isSyncFailedToWait,
+  prepareThenPublish,
+} from './lib/sendOutcome'
+export type { SendError, SendResult, SendStatus } from './lib/sendOutcome'
 export * from './lib/ContentCodec'
 export { Conversation, ConversationVersion } from './lib/Conversation'
 export { XMTPPush } from './lib/XMTPPush'

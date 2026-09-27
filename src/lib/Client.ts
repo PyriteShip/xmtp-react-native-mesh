@@ -829,6 +829,55 @@ export class Client<
   }
 
   /**
+   * xmtp-mesh restore convergence (Android, env 'mesh'): after the mesh node replaced this inbox's
+   * identity log with an older one that does not list this installation
+   * (`Mesh.addIdentityListener` reports 'rebaseNeeded'), adds this installation to it, signed by
+   * `signer`. Resolves false when nothing was needed. Rejects with code
+   * 'E_MESH_TOO_MANY_INSTALLATIONS' when the log is full. Never overlap it with another signing
+   * call: the 'sign' listener is shared.
+   */
+  async meshRebaseInstallation(
+    signer: Signer | WalletClient | null
+  ): Promise<boolean> {
+    const signingKey = getSigner(signer)
+    if (!signingKey) {
+      throw new Error('Signer is not configured')
+    }
+
+    return new Promise<boolean>((resolve, reject) => {
+      ;(async () => {
+        Client.signSubscription = XMTPModule.emitter.addListener(
+          'sign',
+          async (message: { id: string; message: string }) => {
+            try {
+              await Client.handleSignatureRequest(signer, message)
+            } catch (e) {
+              const errorMessage =
+                'ERROR in meshRebaseInstallation. User rejected signature'
+              console.info(errorMessage, e)
+              Client.signSubscription?.remove()
+              reject(errorMessage)
+            }
+          }
+        )
+
+        const rebased = await XMTPModule.meshRebaseInstallation(
+          this.installationId,
+          await signingKey.getIdentifier(),
+          signingKey.signerType?.(),
+          signingKey.getChainId?.(),
+          signingKey.getBlockNumber?.()
+        )
+        Client.signSubscription?.remove()
+        resolve(rebased)
+      })().catch((error) => {
+        Client.signSubscription?.remove()
+        reject(error)
+      })
+    })
+  }
+
+  /**
    * Sign this message with the current installation key.
    * @param {string} message - The message to sign.
    * @returns {Promise<Uint8Array>} A Promise resolving to the signature bytes.
@@ -1233,7 +1282,7 @@ export class Client<
   }
 }
 
-export type XMTPEnvironment = 'local' | 'dev' | 'production'
+export type XMTPEnvironment = 'local' | 'dev' | 'production' | 'mesh'
 export type SignatureType = 'revokeInstallations'
 
 export type ForkRecoveryPolicy = 'none' | 'all' | 'groups'
