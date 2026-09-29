@@ -57,7 +57,7 @@ test('MeshBridge.kt drops the separate synchronized(this) watcher mechanism', ()
 
 test('start() creates watchers inside lock.withLock, not after it releases', () => {
   const { inner: fnBody } = kotlinFunctionBody(
-    /suspend fun start\(context: Context, client: Client, options: MeshOptions, relay: Boolean\)\s*/,
+    /suspend fun start\(\s*context: Context,\s*client: Client,\s*options: MeshOptions,\s*relay: Boolean,\s*accountKey: ByteArray,\s*beginRestoreWindow: Boolean,?\s*\)\s*/,
     'start'
   )
   const lockMatch = /lock\.withLock\s*/.exec(fnBody)

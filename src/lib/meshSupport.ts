@@ -6,7 +6,7 @@
  * No runtime imports: test-node/ loads this file directly with Node's type
  * stripping.
  */
-export const MESH_FORK_VERSION = '5.7.0-mesh.10'
+export const MESH_FORK_VERSION = '5.7.0-mesh.11'
 
 export const MESH_UNSUPPORTED_MESSAGE =
   "XMTP env 'mesh' is supported on Android only"

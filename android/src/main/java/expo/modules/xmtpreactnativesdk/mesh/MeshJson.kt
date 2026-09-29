@@ -3,8 +3,10 @@ package expo.modules.xmtpreactnativesdk.mesh
 import com.google.gson.Gson
 import org.xmtp.android.library.mesh.MeshIdentityEvent
 import org.xmtp.android.library.mesh.MeshIdentityOutcome
+import org.xmtp.android.library.mesh.MeshPairingState
 import org.xmtp.android.library.mesh.MeshRelayState
 import org.xmtp.android.library.toHex
+import uniffi.xmtpv3.FfiContact
 import uniffi.xmtpv3.FfiMeshStats
 import uniffi.xmtpv3.FfiRelayStats
 import uniffi.xmtpv3.FfiVerifiedPeer
@@ -62,6 +64,7 @@ internal object MeshJson {
                     "droppedExpired" to s.droppedExpired.toLong(),
                     "droppedShare" to s.droppedShare.toLong(),
                     "droppedRate" to s.droppedRate.toLong(),
+                    "droppedFull" to s.droppedFull.toLong(),
                     "pushed" to s.pushed.toLong(),
                     "originated" to s.originated.toLong(),
                     "delivered" to s.delivered.toLong(),
@@ -84,7 +87,45 @@ internal object MeshJson {
                     "seqRejectedWrongSigner" to s.seqRejectedWrongSigner.toLong(),
                     "seqEquivocations" to s.seqEquivocations.toLong(),
                     "peersRejectedVersion" to s.peersRejectedVersion.toLong(),
+                    "linksContact" to s.linksContact.toLong(),
+                    "linksRelay" to s.linksRelay.toLong(),
+                    "linksPairing" to s.linksPairing.toLong(),
+                    "handshakeFailed" to s.handshakeFailed.toLong(),
+                    "linkFrameRejected" to s.linkFrameRejected.toLong(),
+                    "discoveryResets" to s.discoveryResets.toLong(),
+                    "relayLinksIdleClosed" to s.relayLinksIdleClosed.toLong(),
+                    "relayLinksForceClosed" to s.relayLinksForceClosed.toLong(),
+                    "relayLinksBackoffRefused" to s.relayLinksBackoffRefused.toLong(),
+                    "pairingAttemptsExhausted" to s.pairingAttemptsExhausted.toLong(),
+                    "restoreContactsAdded" to s.restoreContactsAdded.toLong(),
                 )
             )
         }
+
+    fun pairing(state: MeshPairingState?): String =
+        if (state == null) {
+            "null"
+        } else {
+            gson.toJson(
+                mapOf(
+                    "on" to state.on,
+                    "pending" to state.pending.map {
+                        mapOf("peerId" to it.peerId, "code" to it.code, "confirmed" to it.confirmed, "peerConfirmed" to it.peerConfirmed)
+                    },
+                    "refusals" to state.refusals.map {
+                        mapOf("peerId" to it.peerId, "code" to it.code, "conflictingInboxId" to it.conflictingInboxId)
+                    },
+                    "attemptsExhausted" to state.attemptsExhausted.toLong(),
+                )
+            )
+        }
+
+    fun contacts(list: List<FfiContact>?): String =
+        if (list == null) {
+            "null"
+        } else {
+            gson.toJson(list.map { mapOf("inboxId" to it.inboxId, "generation" to it.generation.toLong(), "autoAdded" to it.autoAdded) })
+        }
+
+    fun restoreWindow(until: ULong?): String = gson.toJson(mapOf("until" to until?.toLong()))
 }

@@ -92,8 +92,13 @@ export async function deleteLocalDatabase(installationId: InstallationId) {
 
 // ---- xmtp-mesh (Android). Values arrive as JSON strings; see lib/meshCodec.ts.
 
-export async function meshStart(installationId: InstallationId, relay: boolean): Promise<void> {
-  return await XMTPModule.meshStart(installationId, relay)
+export async function meshStart(
+  installationId: InstallationId,
+  relay: boolean,
+  accountKeyHex: string,
+  beginRestoreWindow: boolean
+): Promise<void> {
+  return await XMTPModule.meshStart(installationId, relay, accountKeyHex, beginRestoreWindow)
 }
 
 export async function meshSetRelayEnabled(enabled: boolean): Promise<void> {
@@ -130,6 +135,46 @@ export function meshRadioStateJson(): string {
 
 export function meshSetPairingMode(enabled: boolean): void {
   XMTPModule.meshSetPairingMode(enabled)
+}
+
+export function meshPairingStateJson(): string {
+  return XMTPModule.meshPairingState()
+}
+
+export function meshConfirmPairing(peerId: string): void {
+  XMTPModule.meshConfirmPairing(peerId)
+}
+
+export function meshRejectPairing(peerId: string): void {
+  XMTPModule.meshRejectPairing(peerId)
+}
+
+export function meshContactsJson(): string {
+  return XMTPModule.meshContacts()
+}
+
+export function meshRemoveContact(inboxId: string): boolean {
+  return XMTPModule.meshRemoveContact(inboxId)
+}
+
+export function meshForgetContact(inboxId: string): boolean {
+  return XMTPModule.meshForgetContact(inboxId)
+}
+
+export function meshResetDiscoveryKey(): number {
+  return XMTPModule.meshResetDiscoveryKey()
+}
+
+export function meshRestoreWindowJson(): string {
+  return XMTPModule.meshRestoreWindow()
+}
+
+export function meshEndRestoreWindow(): void {
+  XMTPModule.meshEndRestoreWindow()
+}
+
+export function meshConfirmRestoredContact(inboxId: string): boolean {
+  return XMTPModule.meshConfirmRestoredContact(inboxId)
 }
 
 export async function meshCanMessage(
@@ -2158,6 +2203,10 @@ export type {
   MeshIdentityOutcome,
   MeshRelayState,
   MeshRelayStats,
+  MeshPairingState,
+  MeshPendingPairing,
+  MeshPairingRefusal,
+  MeshContact,
   MeshStats,
 } from './lib/meshCodec'
 export {

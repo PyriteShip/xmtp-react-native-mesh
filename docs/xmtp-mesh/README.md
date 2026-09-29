@@ -21,7 +21,12 @@ verified in the simulator; multi-hop on three or more real phones is not yet tes
   the multi-hop store-and-forward relay described in the design doc's Part R.
 - **Signed sequencing**: `stats()` returns the order-check counters (rows signed and checked,
   rows refused by reason, peers refused for an older version), described in the design doc's
-  §B13. A mesh.10 phone syncs only with mesh.10 phones.
+  §B13. A mesh.11 phone syncs only with mesh.11 phones.
+- **Private discovery** (libxmtp fork DESIGN.md §B14): `Mesh.start` takes the account key and an
+  optional restore window; in-person pairing (`setPairingMode`, `pairingState`, `confirmPairing`,
+  `rejectPairing`), contacts (`contacts`, `removeContact`, `forgetContact`, `resetDiscoveryKey`)
+  and the restore window (`restoreWindowUntil`, `endRestoreWindow`, `confirmRestoredContact`).
+  mesh.11 syncs only with mesh.11.
 - **Events**: `addPeersListener`, `addRadioListener`, `addBluetoothListener`, `addRelayListener`,
   `addIdentityListener` (restore convergence: `reloaded` / `rebaseNeeded` /
   `tooManyInstallations`).

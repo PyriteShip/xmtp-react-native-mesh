@@ -7,7 +7,7 @@ import {
 } from '../src/lib/meshSupport.ts'
 
 test('names the fork version', () => {
-  assert.equal(MESH_FORK_VERSION, '5.7.0-mesh.10')
+  assert.equal(MESH_FORK_VERSION, '5.7.0-mesh.11')
 })
 
 test("'mesh' is allowed on Android", () => {

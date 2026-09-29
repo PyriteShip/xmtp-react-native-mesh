@@ -18,10 +18,11 @@ test('parseRelayState reads the bridge JSON and defaults safely', () => {
 
 test('parseRelayStats maps counters and returns null for none', () => {
   const s = parseRelayStats(
-    '{"accepted":3,"duplicate":0,"droppedInvalid":0,"droppedExpired":0,"droppedShare":1,"droppedRate":2,"pushed":9,"originated":4,"delivered":2,"deliveredUnspooled":1,"refsSent":1}'
+    '{"accepted":3,"duplicate":0,"droppedInvalid":0,"droppedExpired":0,"droppedShare":1,"droppedRate":2,"droppedFull":5,"pushed":9,"originated":4,"delivered":2,"deliveredUnspooled":1,"refsSent":1}'
   )
   assert.equal(s.accepted, 3)
   assert.equal(s.deliveredUnspooled, 1)
+  assert.equal(s.droppedFull, 5)
   assert.equal(parseRelayStats('null'), null)
   assert.equal(parseRelayStats(''), null)
 })
@@ -31,7 +32,7 @@ const read = (rel) =>
 
 test('the native module exposes the relay functions and event', () => {
   const mod = read('../android/src/main/java/expo/modules/xmtpreactnativesdk/XMTPModule.kt')
-  assert.match(mod, /AsyncFunction\("meshStart"\) Coroutine \{ installationId: String, relay: Boolean ->/)
+  assert.match(mod, /AsyncFunction\("meshStart"\) Coroutine \{ installationId: String, relay: Boolean, accountKeyHex: String, beginRestoreWindow: Boolean ->/)
   assert.match(mod, /AsyncFunction\("meshSetRelayEnabled"\)/)
   assert.match(mod, /Function\("meshRelayState"\)/)
   assert.match(mod, /Function\("meshRelayStats"\)/)
@@ -42,9 +43,9 @@ test('the bridge watches Mesh.relay and resets it on stop', () => {
   const bridge = read('../android/src/main/java/expo/modules/xmtpreactnativesdk/mesh/MeshBridge.kt')
   assert.match(bridge, /Mesh\.relay\.collect/)
   assert.match(bridge, /const val EVENT_RELAY = "meshRelay"/)
-  assert.match(bridge, /Mesh\.start\(app, client, options, relay = relay\)/)
+  assert.match(bridge, /Mesh\.start\(app, client, options, accountKey\.copyOf\(\), relay = relay, beginRestoreWindow = beginRestoreWindow\)/)
 })
 
-test('the AAR pin is mesh.10', () => {
-  assert.match(read('../android/build.gradle'), /org\.xmtp:android:4\.10\.0-rc2-mesh\.10"/)
+test('the AAR pin is mesh.11', () => {
+  assert.match(read('../android/build.gradle'), /org\.xmtp:android:4\.10\.0-rc2-mesh\.11"/)
 })

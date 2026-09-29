@@ -12,11 +12,22 @@ const KEYS = [
   'seqRejectedWrongSigner',
   'seqEquivocations',
   'peersRejectedVersion',
+  'linksContact',
+  'linksRelay',
+  'linksPairing',
+  'handshakeFailed',
+  'linkFrameRejected',
+  'discoveryResets',
+  'relayLinksIdleClosed',
+  'relayLinksForceClosed',
+  'relayLinksBackoffRefused',
+  'pairingAttemptsExhausted',
+  'restoreContactsAdded',
 ]
 
 test('parseMeshStats maps every counter', () => {
   const s = parseMeshStats(
-    '{"seqRowsSigned":5,"seqRowsVerified":4,"seqRejectedMissingProof":1,"seqRejectedBadSignature":2,"seqRejectedWrongSigner":3,"seqEquivocations":0,"peersRejectedVersion":6}'
+    '{"seqRowsSigned":5,"seqRowsVerified":4,"seqRejectedMissingProof":1,"seqRejectedBadSignature":2,"seqRejectedWrongSigner":3,"seqEquivocations":0,"peersRejectedVersion":6,"linksContact":7,"linksRelay":8,"linksPairing":9,"handshakeFailed":10,"linkFrameRejected":11,"discoveryResets":12,"relayLinksIdleClosed":13,"relayLinksForceClosed":14,"relayLinksBackoffRefused":15,"pairingAttemptsExhausted":16,"restoreContactsAdded":17}'
   )
   assert.deepEqual(s, {
     seqRowsSigned: 5,
@@ -26,6 +37,17 @@ test('parseMeshStats maps every counter', () => {
     seqRejectedWrongSigner: 3,
     seqEquivocations: 0,
     peersRejectedVersion: 6,
+    linksContact: 7,
+    linksRelay: 8,
+    linksPairing: 9,
+    handshakeFailed: 10,
+    linkFrameRejected: 11,
+    discoveryResets: 12,
+    relayLinksIdleClosed: 13,
+    relayLinksForceClosed: 14,
+    relayLinksBackoffRefused: 15,
+    pairingAttemptsExhausted: 16,
+    restoreContactsAdded: 17,
   })
 })
 

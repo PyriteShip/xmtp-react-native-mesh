@@ -164,6 +164,8 @@ fun getMessageDeletionsCacheKey(installationId: String): String {
     return "${installationId}:messageDeletions"
 }
 
+private val ACCOUNT_KEY_HEX = Regex("^(0x)?[0-9a-fA-F]{64}$")
+
 class XMTPModule : Module() {
     private val PREFS_NAME = "XMTPModulePrefs"
     private val LOG_WRITER_ACTIVE_KEY = "logWriterActive"
@@ -408,12 +410,17 @@ class XMTPModule : Module() {
 
         // ---- xmtp-mesh (Android only; the JS side refuses 'mesh' elsewhere) ----
 
-        AsyncFunction("meshStart") Coroutine { installationId: String, relay: Boolean ->
+        AsyncFunction("meshStart") Coroutine { installationId: String, relay: Boolean, accountKeyHex: String, beginRestoreWindow: Boolean ->
             withContext(Dispatchers.IO) {
+                if (!ACCOUNT_KEY_HEX.matches(accountKeyHex)) {
+                    throw CodedException("E_MESH_BAD_ACCOUNT_KEY", "The account key must be 32 bytes of hex", null)
+                }
                 val client = clients[installationId] ?: throw XMTPException("No client")
                 val options = meshOptions[installationId]
                     ?: throw XMTPException("client $installationId was not created with env 'mesh'")
-                MeshBridge.mapNodeMismatch { meshBridge.start(context, client, options, relay) }
+                // MeshBridge.start wipes this array.
+                val key = accountKeyHex.removePrefix("0x").hexToByteArray()
+                MeshBridge.mapNodeMismatch { meshBridge.start(context, client, options, relay, key, beginRestoreWindow) }
             }
         }
 
@@ -440,6 +447,26 @@ class XMTPModule : Module() {
         Function("meshStats") { -> meshBridge.meshStatsJson() }
 
         Function("meshSetPairingMode") { enabled: Boolean -> meshBridge.setPairingMode(enabled) }
+
+        Function("meshPairingState") { -> meshBridge.pairingJson() }
+
+        Function("meshConfirmPairing") { peerId: String -> meshBridge.confirmPairing(peerId) }
+
+        Function("meshRejectPairing") { peerId: String -> meshBridge.rejectPairing(peerId) }
+
+        Function("meshContacts") { -> meshBridge.contactsJson() }
+
+        Function("meshRemoveContact") { inboxId: String -> meshBridge.removeContact(inboxId) }
+
+        Function("meshForgetContact") { inboxId: String -> meshBridge.forgetContact(inboxId) }
+
+        Function("meshResetDiscoveryKey") { -> meshBridge.resetDiscoveryKey() }
+
+        Function("meshRestoreWindow") { -> meshBridge.restoreWindowJson() }
+
+        Function("meshEndRestoreWindow") { -> meshBridge.endRestoreWindow() }
+
+        Function("meshConfirmRestoredContact") { inboxId: String -> meshBridge.confirmRestoredContact(inboxId) }
 
         AsyncFunction("meshCanMessage") Coroutine { installationId: String, peerInstallationId: String ->
             withContext(Dispatchers.IO) {

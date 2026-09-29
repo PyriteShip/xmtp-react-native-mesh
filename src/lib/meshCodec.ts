@@ -5,7 +5,7 @@
  * test-node/).
  */
 export interface MeshPeer {
-  /** Connection-scoped id ("<shortId>#<n>"); never key contacts by it. */
+  /** Connection-scoped id ("p#<n>"); never key contacts by it. */
   peerId: string
   inboxId: string
   /** Lowercase hex, no 0x. */
@@ -126,6 +126,8 @@ export interface MeshRelayStats {
   droppedExpired: number
   droppedShare: number
   droppedRate: number
+  /** A stranger's envelope refused because only contacts' entries were left to displace (DESIGN.md §B14.6). */
+  droppedFull: number
   pushed: number
   originated: number
   delivered: number
@@ -147,7 +149,7 @@ export function parseRelayState(json: unknown): MeshRelayState {
 
 const STAT_KEYS: (keyof MeshRelayStats)[] = [
   'accepted', 'duplicate', 'droppedInvalid', 'droppedExpired', 'droppedShare',
-  'droppedRate', 'pushed', 'originated', 'delivered', 'deliveredUnspooled', 'refsSent',
+  'droppedRate', 'droppedFull', 'pushed', 'originated', 'delivered', 'deliveredUnspooled', 'refsSent',
 ]
 
 export function parseRelayStats(json: unknown): MeshRelayStats | null {
@@ -175,13 +177,46 @@ export interface MeshStats {
   seqRejectedWrongSigner: number
   /** Two different rows signed by one installation at the same place, kept as proof. */
   seqEquivocations: number
-  /** Peers refused for speaking an older protocol version (mesh.10 syncs only with mesh.10). */
+  /** Peers refused for speaking an older protocol version (mesh.11 syncs only with mesh.11). */
   peersRejectedVersion: number
+  /** Links opened with a contact this phone recognises. */
+  linksContact: number
+  /** Links opened with a relay that is not a contact. */
+  linksRelay: number
+  /** Links opened for in-person pairing. */
+  linksPairing: number
+  /** Links that failed the key handshake. */
+  handshakeFailed: number
+  /** A record, frame, Hello, Auth or card a link refused (DESIGN.md §B14.6). */
+  linkFrameRejected: number
+  /** Times the discovery key was replaced. */
+  discoveryResets: number
+  /** Relay links closed for sitting idle. */
+  relayLinksIdleClosed: number
+  /** Relay links closed at the lifetime cap or when relay was turned off (DESIGN.md §B14.6). */
+  relayLinksForceClosed: number
+  /** Relay links refused while waiting out a back-off. */
+  relayLinksBackoffRefused: number
+  /** Times pairing mode ended after too many unfinished pairings. */
+  pairingAttemptsExhausted: number
+  /** Contacts added back by themselves during a restore window. */
+  restoreContactsAdded: number
 }
 
 const MESH_STAT_KEYS: (keyof MeshStats)[] = [
   'seqRowsSigned', 'seqRowsVerified', 'seqRejectedMissingProof', 'seqRejectedBadSignature',
   'seqRejectedWrongSigner', 'seqEquivocations', 'peersRejectedVersion',
+  'linksContact',
+  'linksRelay',
+  'linksPairing',
+  'handshakeFailed',
+  'linkFrameRejected',
+  'discoveryResets',
+  'relayLinksIdleClosed',
+  'relayLinksForceClosed',
+  'relayLinksBackoffRefused',
+  'pairingAttemptsExhausted',
+  'restoreContactsAdded',
 ]
 
 export function parseMeshStats(json: unknown): MeshStats | null {
@@ -216,4 +251,99 @@ export function parseIdentityEvent(json: unknown): MeshIdentityEvent | null {
   if (!nonEmptyString(inboxId)) return null
   if (!IDENTITY_OUTCOMES.includes(outcome as MeshIdentityOutcome)) return null
   return { inboxId, outcome: outcome as MeshIdentityOutcome }
+}
+
+export interface MeshPendingPairing {
+  peerId: string
+  /** The 6 digits both phones show. */
+  code: string
+  /** This phone's person confirmed. */
+  confirmed: boolean
+  /** The other phone's person confirmed. */
+  peerConfirmed: boolean
+}
+
+/** A pairing refused because the other phone's key is on file for another contact. */
+export interface MeshPairingRefusal {
+  /** The phone being paired now. */
+  peerId: string
+  /** The code shown for that pairing. */
+  code: string
+  /**
+   * The contact already holding that key. Either person may be the impostor: name both and
+   * ask which one the user trusts; Mesh.forgetContact frees the key only if they pick the new one.
+   */
+  conflictingInboxId: string
+}
+
+export interface MeshPairingState {
+  on: boolean
+  pending: MeshPendingPairing[]
+  refusals: MeshPairingRefusal[]
+  /** Times the node left pairing mode after too many unfinished pairings. */
+  attemptsExhausted: number
+}
+
+export interface MeshContact {
+  inboxId: string
+  generation: number
+  /** Added back by itself during a restore window: confirm or remove it. */
+  autoAdded: boolean
+}
+
+const PAIRING_CODE = /^\d{6}$/
+
+function finiteOr0(n: unknown): number {
+  return typeof n === 'number' && Number.isFinite(n) ? n : 0
+}
+
+export function parsePairingState(json: unknown): MeshPairingState | null {
+  const doc = parse(json)
+  if (typeof doc !== 'object' || doc === null || Array.isArray(doc)) return null
+  const v = doc as Record<string, unknown>
+  const pending: MeshPendingPairing[] = []
+  for (const raw of Array.isArray(v.pending) ? v.pending : []) {
+    if (typeof raw !== 'object' || raw === null) continue
+    const { peerId, code, confirmed, peerConfirmed } = raw as Record<string, unknown>
+    if (!nonEmptyString(peerId) || typeof code !== 'string' || !PAIRING_CODE.test(code)) continue
+    pending.push({ peerId, code, confirmed: confirmed === true, peerConfirmed: peerConfirmed === true })
+  }
+  const refusals: MeshPairingRefusal[] = []
+  for (const raw of Array.isArray(v.refusals) ? v.refusals : []) {
+    if (typeof raw !== 'object' || raw === null) continue
+    const { peerId, code, conflictingInboxId } = raw as Record<string, unknown>
+    if (!nonEmptyString(peerId) || !nonEmptyString(conflictingInboxId)) continue
+    refusals.push({ peerId, code: typeof code === 'string' ? code : '', conflictingInboxId })
+  }
+  return { on: v.on === true, pending, refusals, attemptsExhausted: finiteOr0(v.attemptsExhausted) }
+}
+
+export function parseContacts(json: unknown): MeshContact[] | null {
+  const doc = parse(json)
+  if (!Array.isArray(doc)) return null
+  const seen = new Set<string>()
+  const out: MeshContact[] = []
+  for (const raw of doc) {
+    if (typeof raw !== 'object' || raw === null) continue
+    const { inboxId, generation, autoAdded } = raw as Record<string, unknown>
+    if (!nonEmptyString(inboxId) || seen.has(inboxId)) continue
+    seen.add(inboxId)
+    out.push({ inboxId, generation: finiteOr0(generation), autoAdded: autoAdded === true })
+  }
+  return out
+}
+
+/** The restore window's end (unix seconds), or null when none is open or the mesh is stopped. */
+export function parseRestoreWindow(json: unknown): number | null {
+  const doc = parse(json)
+  if (typeof doc !== 'object' || doc === null) return null
+  const until = (doc as Record<string, unknown>).until
+  return typeof until === 'number' && Number.isFinite(until) ? until : null
+}
+
+/** A 32-byte private key as lowercase hex without 0x, or null. */
+export function normalizeAccountKey(v: unknown): string | null {
+  if (typeof v !== 'string') return null
+  const hex = v.startsWith('0x') || v.startsWith('0X') ? v.slice(2) : v
+  return /^[0-9a-fA-F]{64}$/.test(hex) ? hex.toLowerCase() : null
 }

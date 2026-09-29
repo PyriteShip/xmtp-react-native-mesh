@@ -23,11 +23,13 @@ import kotlinx.coroutines.sync.withLock
 import org.xmtp.android.library.Client
 import org.xmtp.android.library.hexToByteArray
 import org.xmtp.android.library.mesh.Mesh
+import org.xmtp.android.library.mesh.MeshException
 import org.xmtp.android.library.mesh.MeshNodeFiles
 import org.xmtp.android.library.mesh.MeshOptions
 import org.xmtp.android.library.mesh.MeshRadio
 import org.xmtp.android.library.mesh.isMeshTooManyInstallations
 import org.xmtp.android.library.mesh.policy.MeshPermissions
+import uniffi.xmtpv3.FfiException
 import java.io.File
 
 /**
@@ -78,26 +80,38 @@ class MeshBridge(private val emit: (String, Map<String, Any?>) -> Unit) {
      * installation with a different Client object this stops and restarts the radio (rebind);
      * for a different installation it rejects with E_MESH_BUSY — call [stop] first.
      */
-    suspend fun start(context: Context, client: Client, options: MeshOptions, relay: Boolean) {
-        val app = context.applicationContext
-        lock.withLock {
-            val serving = running
-            if (serving != null && Mesh.radio != null && serving.installationId != client.installationId) {
-                throw CodedException(
-                    "E_MESH_BUSY",
-                    "The mesh radio is serving installation ${serving.installationId}; call Mesh.stop() first",
-                    null,
-                )
+    suspend fun start(
+        context: Context,
+        client: Client,
+        options: MeshOptions,
+        relay: Boolean,
+        accountKey: ByteArray,
+        beginRestoreWindow: Boolean,
+    ) {
+        // The key is wiped whatever happens; Mesh.start wipes the copy it is given.
+        try {
+            val app = context.applicationContext
+            lock.withLock {
+                val serving = running
+                if (serving != null && Mesh.radio != null && serving.installationId != client.installationId) {
+                    throw CodedException(
+                        "E_MESH_BUSY",
+                        "The mesh radio is serving installation ${serving.installationId}; call Mesh.stop() first",
+                        null,
+                    )
+                }
+                if (Mesh.radio != null && serving?.client !== client) {
+                    // Rebind: the radio (and the node's sync) is bound to another Client object.
+                    cancelWatchers()
+                    Mesh.stop(app)
+                    running = null
+                }
+                val radio = Mesh.start(app, client, options, accountKey.copyOf(), relay = relay, beginRestoreWindow = beginRestoreWindow)
+                running = Running(client.installationId, client, options.dbPath)
+                if (watchers.isEmpty()) watchers = watch(radio)
             }
-            if (Mesh.radio != null && serving?.client !== client) {
-                // Rebind: the radio (and the node's sync) is bound to another Client object.
-                cancelWatchers()
-                Mesh.stop(app)
-                running = null
-            }
-            val radio = Mesh.start(app, client, options, relay = relay)
-            running = Running(client.installationId, client, options.dbPath)
-            if (watchers.isEmpty()) watchers = watch(radio)
+        } finally {
+            accountKey.fill(0)
         }
     }
 
@@ -213,9 +227,7 @@ class MeshBridge(private val emit: (String, Map<String, Any?>) -> Unit) {
         )
     }
 
-    fun setPairingMode(enabled: Boolean) {
-        Mesh.radio?.setPairingMode(enabled)
-    }
+    fun setPairingMode(enabled: Boolean) = Mesh.setPairingMode(enabled)
 
     fun peersJson(): String = MeshJson.peers(Mesh.radio?.verifiedPeers?.value?.values ?: emptyList())
 
@@ -230,6 +242,54 @@ class MeshBridge(private val emit: (String, Map<String, Any?>) -> Unit) {
 
     /** Signed-sequencing counters of the running node; "null" while stopped. */
     fun meshStatsJson(): String = MeshJson.meshStats(Mesh.stats())
+
+    /** Null JSON while stopped, also when the node stops under the poll. */
+    fun pairingJson(): String =
+        try {
+            MeshJson.pairing(Mesh.pairingState())
+        } catch (e: FfiException) {
+            if (Mesh.radio == null) "null" else throw e
+        }
+
+    fun confirmPairing(peerId: String) = running { Mesh.confirmPairing(peerId) }
+
+    fun rejectPairing(peerId: String) = running { Mesh.rejectPairing(peerId) }
+
+    /** Null JSON while stopped; a store error on a running node propagates. */
+    fun contactsJson(): String =
+        try {
+            MeshJson.contacts(Mesh.contacts())
+        } catch (e: FfiException) {
+            if (Mesh.radio == null) "null" else throw e
+        }
+
+    fun removeContact(inboxId: String): Boolean = running { Mesh.removeContact(inboxId) }
+
+    fun forgetContact(inboxId: String): Boolean = running { Mesh.forgetContact(inboxId) }
+
+    fun resetDiscoveryKey(): Int = running { Mesh.resetDiscoveryKey().toInt() }
+
+    fun restoreWindowJson(): String = MeshJson.restoreWindow(Mesh.restoreWindowUntil())
+
+    fun endRestoreWindow() = running { Mesh.endRestoreWindow() }
+
+    fun confirmRestoredContact(inboxId: String): Boolean = running { Mesh.confirmRestoredContact(inboxId) }
+
+    /**
+     * The mesh stopped: a coded error JS can match (E_MESH_NOT_RUNNING). A node racing a stop
+     * throws FfiException instead of MeshException; it is mapped the same way while the radio
+     * is gone. Other node refusals propagate.
+     */
+    private fun <T> running(block: () -> T): T =
+        try {
+            block()
+        } catch (e: MeshException) {
+            if (e.message == Mesh.NOT_RUNNING) throw CodedException("E_MESH_NOT_RUNNING", e.message, e)
+            throw e
+        } catch (e: FfiException) {
+            if (Mesh.radio == null) throw CodedException("E_MESH_NOT_RUNNING", Mesh.NOT_RUNNING, e)
+            throw e
+        }
 
     /**
      * The key-package gate: true once the local node holds a valid package for the peer.

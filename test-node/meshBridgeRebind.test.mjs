@@ -50,13 +50,13 @@ test('the running record is process-wide (companion object), like Mesh itself', 
 })
 
 test('start rejects a different installation with E_MESH_BUSY', () => {
-  const locked = lockBody(body(/suspend fun start\(context: Context, client: Client, options: MeshOptions, relay: Boolean\)\s*/, 'start'))
+  const locked = lockBody(body(/suspend fun start\(\s*context: Context,\s*client: Client,\s*options: MeshOptions,\s*relay: Boolean,\s*accountKey: ByteArray,\s*beginRestoreWindow: Boolean,?\s*\)\s*/, 'start'))
   assert.match(locked, /serving\.installationId != client\.installationId/, locked)
   assert.match(locked, /"E_MESH_BUSY"/, locked)
 })
 
 test('start rebinds a new Client object for the same installation: stop, then start', () => {
-  const locked = lockBody(body(/suspend fun start\(context: Context, client: Client, options: MeshOptions, relay: Boolean\)\s*/, 'start'))
+  const locked = lockBody(body(/suspend fun start\(\s*context: Context,\s*client: Client,\s*options: MeshOptions,\s*relay: Boolean,\s*accountKey: ByteArray,\s*beginRestoreWindow: Boolean,?\s*\)\s*/, 'start'))
   assert.match(locked, /serving\?\.client !== client/, locked)
   const stopAt = locked.search(/\bMesh\.stop\(/)
   const startAt = locked.search(/\bMesh\.start\(/)

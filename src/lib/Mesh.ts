@@ -4,20 +4,26 @@ import { Platform } from 'react-native'
 import type { InstallationId } from './Client'
 import {
   BluetoothStatus,
+  MeshContact,
   MeshIdentityEvent,
+  MeshPairingState,
   MeshPeer,
   MeshRadioState,
   MeshRelayState,
   MeshRelayStats,
   MeshStats,
   isValidInstallationId,
+  normalizeAccountKey,
   parseBluetoothStatus,
+  parseContacts,
   parseIdentityEvent,
   parseMeshStats,
+  parsePairingState,
   parsePeers,
   parseRadioState,
   parseRelayState,
   parseRelayStats,
+  parseRestoreWindow,
   parseStrings,
 } from './meshCodec'
 import { MESH_UNSUPPORTED_MESSAGE } from './meshSupport'
@@ -49,13 +55,21 @@ export const Mesh = {
    * Idempotent for the same client. A new client object for the installation the
    * radio already serves (e.g. after a JS reload) rebinds the radio to it; a
    * different installation rejects with code `E_MESH_BUSY` until `stop()`.
+   * `accountKey`: the account's 32-byte private key as hex (the key the recovery phrase
+   * restores); the node derives its link keys from it and keeps only those. Anything else
+   * rejects with `E_MESH_BAD_ACCOUNT_KEY`. `beginRestoreWindow`: true on the first start after
+   * a restore from the recovery phrase, so contacts reconnect by themselves for 72 hours.
    */
   async start(
     installationId: InstallationId | string,
-    options?: { relay?: boolean }
+    options: { relay?: boolean; accountKey: string; beginRestoreWindow?: boolean }
   ): Promise<void> {
     assertAndroid()
-    await XMTPModule.meshStart(installationId as InstallationId, options?.relay ?? true)
+    const key = normalizeAccountKey(options?.accountKey)
+    if (!key) {
+      throw Object.assign(new Error('accountKey must be a 32-byte hex private key'), { code: 'E_MESH_BAD_ACCOUNT_KEY' })
+    }
+    await XMTPModule.meshStart(installationId as InstallationId, options.relay ?? true, key, options.beginRestoreWindow ?? false)
   },
 
   /** The user's relay choice; applies to a running radio at once (no restart). */
@@ -112,12 +126,72 @@ export const Mesh = {
   },
 
   /**
-   * Advertise the pairing-mode flag while an Add-contact screen is open (the xmtp-mesh design
-   * doc in the libxmtp fork, DESIGN.md §B6.3).
+   * Pairing mode (the libxmtp fork's DESIGN.md §B14.4): advertise the pairing flag and accept
+   * pairing links while the in-person pairing screen is open. The node also leaves it by itself
+   * after a pairing or 5 unfinished ones.
    */
   setPairingMode(enabled: boolean): void {
     assertAndroid()
     XMTPModule.meshSetPairingMode(enabled)
+  },
+
+  /** Pairing mode, open pairings with their codes, and refusals; null while stopped. Poll while the pairing screen is open. */
+  pairingState(): MeshPairingState | null {
+    assertAndroid()
+    return parsePairingState(XMTPModule.meshPairingStateJson())
+  },
+
+  /** The person compared the codes and they match. */
+  confirmPairing(peerId: string): void {
+    assertAndroid()
+    XMTPModule.meshConfirmPairing(peerId)
+  },
+
+  /** The codes differ, or the person declined. */
+  rejectPairing(peerId: string): void {
+    assertAndroid()
+    XMTPModule.meshRejectPairing(peerId)
+  },
+
+  /** Contacts this phone recognises nearby; null while stopped. */
+  contacts(): MeshContact[] | null {
+    assertAndroid()
+    return parseContacts(XMTPModule.meshContactsJson())
+  },
+
+  /** Stop recognising and accepting this contact, and close its links. */
+  removeContact(inboxId: string): boolean {
+    assertAndroid()
+    return XMTPModule.meshRemoveContact(inboxId)
+  },
+
+  /** Remove and forget completely, so a key this contact claimed is free for someone else. */
+  forgetContact(inboxId: string): boolean {
+    assertAndroid()
+    return XMTPModule.meshForgetContact(inboxId)
+  },
+
+  /** A new discovery key: people you removed stop recognising this phone. Returns the new generation. */
+  resetDiscoveryKey(): number {
+    assertAndroid()
+    return XMTPModule.meshResetDiscoveryKey()
+  },
+
+  /** The restore window's end (unix seconds), or null. */
+  restoreWindowUntil(): number | null {
+    assertAndroid()
+    return parseRestoreWindow(XMTPModule.meshRestoreWindowJson())
+  },
+
+  endRestoreWindow(): void {
+    assertAndroid()
+    XMTPModule.meshEndRestoreWindow()
+  },
+
+  /** Keep a contact the restore window added back: it gets this phone's card from now on. */
+  confirmRestoredContact(inboxId: string): boolean {
+    assertAndroid()
+    return XMTPModule.meshConfirmRestoredContact(inboxId)
   },
 
   /**
