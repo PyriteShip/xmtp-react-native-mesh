@@ -73,7 +73,7 @@ jobs:
       - name: Look for an earlier check of this tag and stack tip
         id: marker
         if: steps.plan.outputs.skip != 'true'
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: .drift-marker
           key: drift-${{ steps.plan.outputs.tag }}-${{ steps.plan.outputs.stack }}
@@ -177,7 +177,7 @@ jobs:
 
       - name: Remember this tag and stack tip
         if: always() && steps.report.outputs.status != ''
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: .drift-marker
           key: drift-${{ steps.plan.outputs.tag }}-${{ steps.plan.outputs.stack }}
